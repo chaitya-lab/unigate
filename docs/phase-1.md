@@ -22,7 +22,8 @@ Status today:
 - fake/internal channels support local end-to-end execution
 - api/web/websocket-style in-process channels support local end-to-end execution
 - a mountable ASGI surface is implemented for HTTP and websocket access
-- restart-safe persistent backends are still pending
+- SQLite-backed sessions, inbox, outbox, and deduplication are implemented
+- richer replay/recovery behavior is still pending
 
 ## Public Deliverables
 

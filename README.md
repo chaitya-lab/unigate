@@ -10,14 +10,16 @@ application, channel adapters, or extensions.
 
 ## Status
 
-This repository now includes a working minimum runtime for local, in-memory
-message flow. It is still early-stage, but the kernel can already:
+This repository now includes a working minimum runtime for local message flow
+with either in-memory state or SQLite-backed persistence. It is still
+early-stage, but the kernel can already:
 
 - register channel instances
 - ingest inbound text events
 - create transport-local sessions
 - deduplicate inbound messages
 - record inbox and outbox state in memory
+- persist sessions, inbox, outbox, and dedup state in SQLite
 - invoke a handler
 - deliver replies through a fake/internal channel
 - emit operational events for the flow
@@ -58,7 +60,12 @@ later phases.
 
 ## Working Minimum
 
-The current minimum working product is in-memory only. It is useful for:
+The current minimum working product supports:
+
+- in-memory runtime for fast local tests
+- SQLite-backed runtime for restart-safe local persistence
+
+It is useful for:
 
 - local development
 - API shape validation
@@ -69,6 +76,7 @@ Implemented runtime pieces:
 
 - `Unigate` runtime orchestration
 - in-memory sessions, inbox, outbox, deduplication, and event bus
+- SQLite-backed sessions, inbox, outbox, and deduplication
 - `InternalChannel`
 - `ApiChannel`
 - `WebChannel`
@@ -133,6 +141,12 @@ await channel.receive_request(
 ```
 
 The reply is captured in `channel.sent_messages`.
+
+To use SQLite persistence:
+
+```python
+gate = Unigate(storage="sqlite", sqlite_path="unigate.db")
+```
 
 ## ASGI Integration
 

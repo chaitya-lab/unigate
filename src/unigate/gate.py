@@ -8,13 +8,13 @@ from inspect import isawaitable
 from typing import Any
 from uuid import uuid4
 
-from .dedup import InMemoryDeduplicator
+from .dedup import InMemoryDeduplicator, SqliteDeduplicator
 from .envelope import OutboundMessage, SenderProfile, UniversalMessage
 from .events import InMemoryEventBus
-from .inbox import InboxRecord, InMemoryInbox
+from .inbox import InboxRecord, InMemoryInbox, SqliteInbox
 from .instance import InstanceRegistry
-from .outbox import InMemoryOutbox, OutboxRecord
-from .session import InMemorySessionStore
+from .outbox import InMemoryOutbox, OutboxRecord, SqliteOutbox
+from .session import InMemorySessionStore, SqliteSessionStore
 
 
 MessageHandler = Callable[[UniversalMessage], Awaitable[OutboundMessage | None] | OutboundMessage | None]
@@ -23,12 +23,22 @@ MessageHandler = Callable[[UniversalMessage], Awaitable[OutboundMessage | None] 
 class Unigate:
     """Minimum working runtime with in-memory state."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, storage: str = "memory", sqlite_path: str | None = None) -> None:
         self.events = InMemoryEventBus()
-        self.sessions = InMemorySessionStore()
-        self.dedup = InMemoryDeduplicator()
-        self.inbox = InMemoryInbox()
-        self.outbox = InMemoryOutbox()
+        if storage == "memory":
+            self.sessions = InMemorySessionStore()
+            self.dedup = InMemoryDeduplicator()
+            self.inbox = InMemoryInbox()
+            self.outbox = InMemoryOutbox()
+        elif storage == "sqlite":
+            if sqlite_path is None:
+                raise ValueError("sqlite_path is required when storage='sqlite'")
+            self.sessions = SqliteSessionStore(sqlite_path)
+            self.dedup = SqliteDeduplicator(sqlite_path)
+            self.inbox = SqliteInbox(sqlite_path)
+            self.outbox = SqliteOutbox(sqlite_path)
+        else:
+            raise ValueError(f"Unsupported storage backend: {storage}")
         self.instances = InstanceRegistry()
         self._handler: MessageHandler | None = None
 
