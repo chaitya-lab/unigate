@@ -25,12 +25,21 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+unigate = "unigate.cli:run"
+
 [project.optional-dependencies]
 dev = [
   "mypy>=1.11",
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
   "ruff>=0.6",
+]
+yaml = [
+  "PyYAML>=6.0",
+]
+server = [
+  "uvicorn>=0.30",
 ]
 
 [tool.setuptools]

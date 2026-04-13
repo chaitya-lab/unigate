@@ -83,6 +83,7 @@ Implemented runtime pieces:
 - `WebSocketServerChannel`
 - `FakeChannel`
 - mountable ASGI integration for HTTP and websocket access
+- CLI entry point and external config loading
 - end-to-end tests using `unittest`
 
 ## Documentation
@@ -111,6 +112,12 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .[dev]
 python -m unittest discover -s tests
+```
+
+Install optional extras when needed:
+
+```powershell
+pip install -e .[server,yaml]
 ```
 
 ## Quickstart
@@ -167,6 +174,44 @@ Available endpoints in the current minimum version:
 - `WS /unigate/channels/ws/{instance}`
 
 This keeps embedded and standalone usage aligned around the same runtime.
+
+## CLI And Config
+
+`unigate` can load config from any path, so another project can keep its own
+runtime config outside this repository and point the CLI to it.
+
+Supported config formats:
+
+- `.json`
+- `.toml`
+- `.yaml` / `.yml` when `PyYAML` is installed
+
+Example config:
+
+```json
+{
+  "unigate": {
+    "storage": "sqlite",
+    "sqlite_path": "./unigate.db",
+    "asgi_prefix": "/unigate",
+    "host": "127.0.0.1",
+    "port": 8000
+  },
+  "instances": {
+    "public_api": { "type": "api" },
+    "site_chat": { "type": "web" },
+    "socket_gateway": { "type": "websocket_server" }
+  }
+}
+```
+
+Useful commands:
+
+```powershell
+unigate check-config --config H:\path\to\unigate.json
+unigate print-config --config H:\path\to\unigate.toml
+unigate serve --config H:\path\to\unigate.json
+```
 
 ## Relationship To The Larger System
 
