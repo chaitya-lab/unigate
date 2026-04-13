@@ -15,6 +15,13 @@ that can:
 - write and deliver outbound responses
 - recover correctly after restart
 
+Status today:
+
+- contracts are implemented
+- an in-memory minimum runtime is implemented
+- fake/internal channels support local end-to-end execution
+- restart-safe persistent backends are still pending
+
 ## Public Deliverables
 
 The initial implementation should introduce these module areas inside

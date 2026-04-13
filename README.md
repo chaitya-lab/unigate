@@ -10,15 +10,24 @@ application, channel adapters, or extensions.
 
 ## Status
 
-This repository is in bootstrap stage. The public architecture and delivery
-plan are defined, and implementation starts with Phase 1 kernel core.
+This repository now includes a working minimum runtime for local, in-memory
+message flow. It is still early-stage, but the kernel can already:
+
+- register channel instances
+- ingest inbound text events
+- create transport-local sessions
+- deduplicate inbound messages
+- record inbox and outbox state in memory
+- invoke a handler
+- deliver replies through a fake/internal channel
+- emit operational events for the flow
 
 Current priorities:
 
-- Define the stable envelope and core contracts.
-- Build inbox, outbox, sessions, deduplication, and resilience primitives.
-- Ship `internal` and `fake` channels first so the kernel is fully testable
-  without external platform SDKs.
+- Extend the minimum runtime beyond in-memory state.
+- Add real backends and richer lifecycle/state handling.
+- Keep `internal` and `fake` channels as the first proof path without external
+  platform SDKs.
 - Add real channels only after the kernel contracts are proven.
 
 ## Design Principles
@@ -47,6 +56,23 @@ Phase 1 focuses on the universal kernel:
 Real platform adapters such as Telegram, WhatsApp, Slack, and SMS follow in
 later phases.
 
+## Working Minimum
+
+The current minimum working product is in-memory only. It is useful for:
+
+- local development
+- API shape validation
+- adapter contract validation
+- end-to-end tests without external dependencies
+
+Implemented runtime pieces:
+
+- `Unigate` runtime orchestration
+- in-memory sessions, inbox, outbox, deduplication, and event bus
+- `InternalChannel`
+- `FakeChannel`
+- end-to-end tests using `unittest`
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)
@@ -72,8 +98,37 @@ separate from the kernel's stable transport contracts.
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .[dev]
-pytest
+python -m unittest discover -s tests
 ```
+
+## Quickstart
+
+```python
+from unigate import Unigate
+from unigate.testing.fake_channel import FakeChannel
+
+gate = Unigate()
+channel = FakeChannel()
+gate.register_instance("internal_app", channel)
+
+@gate.on_message
+def handle(message):
+    return gate.reply(message, text=f"echo: {message.text}")
+```
+
+Then drive an inbound event with the fake channel:
+
+```python
+await channel.receive_text(
+    channel_message_id="in-1",
+    channel_session_key="chat-1",
+    sender_id="user-1",
+    sender_name="User One",
+    text="hello",
+)
+```
+
+The reply is captured in `channel.sent_messages`.
 
 ## Relationship To The Larger System
 
