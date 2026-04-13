@@ -21,6 +21,7 @@ Status today:
 - an in-memory minimum runtime is implemented
 - fake/internal channels support local end-to-end execution
 - api/web/websocket-style in-process channels support local end-to-end execution
+- a mountable ASGI surface is implemented for HTTP and websocket access
 - restart-safe persistent backends are still pending
 
 ## Public Deliverables

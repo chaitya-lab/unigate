@@ -18,11 +18,11 @@ class FakeChannel(LoopbackChannel):
         sender_id: str,
         sender_name: str,
         text: str,
-    ) -> None:
+    ):
         if self.gate is None or self.instance_id is None:
             raise RuntimeError("FakeChannel must be registered before use.")
 
-        await self.gate.receive_text(
+        return await self.gate.receive_text(
             instance_id=self.instance_id,
             channel_message_id=channel_message_id,
             channel_session_key=channel_session_key,

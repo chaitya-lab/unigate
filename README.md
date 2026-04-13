@@ -74,6 +74,7 @@ Implemented runtime pieces:
 - `WebChannel`
 - `WebSocketServerChannel`
 - `FakeChannel`
+- mountable ASGI integration for HTTP and websocket access
 - end-to-end tests using `unittest`
 
 ## Documentation
@@ -132,6 +133,26 @@ await channel.receive_request(
 ```
 
 The reply is captured in `channel.sent_messages`.
+
+## ASGI Integration
+
+You can mount `unigate` inside another ASGI app or run it behind a simple ASGI
+server.
+
+```python
+from unigate import Unigate, create_asgi_app
+
+gate = Unigate()
+app = create_asgi_app(gate, prefix="/unigate")
+```
+
+Available endpoints in the current minimum version:
+
+- `POST /unigate/channels/api/{instance}/messages`
+- `POST /unigate/channels/web/{instance}/messages`
+- `WS /unigate/channels/ws/{instance}`
+
+This keeps embedded and standalone usage aligned around the same runtime.
 
 ## Relationship To The Larger System
 

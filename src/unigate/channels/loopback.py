@@ -81,13 +81,13 @@ class LoopbackChannel:
         sender_handle: str | None = None,
         receiver_id: str | None = None,
         bot_mentioned: bool = True,
-    ) -> None:
+    ) -> UniversalMessage:
         """Inject one inbound text message through the gate."""
 
         if self.gate is None or self.instance_id is None:
             raise RuntimeError(f"{self.__class__.__name__} must be registered before use.")
 
-        await self.gate.receive_text(
+        return await self.gate.receive_text(
             instance_id=self.instance_id,
             channel_message_id=channel_message_id,
             channel_session_key=channel_session_key,

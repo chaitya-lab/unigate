@@ -20,8 +20,8 @@ class WebSocketServerChannel(LoopbackChannel):
         sender_id: str,
         sender_name: str,
         text: str,
-    ) -> None:
-        await self.inject_text(
+    ):
+        return await self.inject_text(
             channel_message_id=frame_id,
             channel_session_key=connection_id,
             sender_id=sender_id,

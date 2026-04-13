@@ -20,8 +20,8 @@ class WebChannel(LoopbackChannel):
         visitor_id: str,
         visitor_name: str,
         text: str,
-    ) -> None:
-        await self.inject_text(
+    ):
+        return await self.inject_text(
             channel_message_id=message_id,
             channel_session_key=browser_session_id,
             sender_id=visitor_id,

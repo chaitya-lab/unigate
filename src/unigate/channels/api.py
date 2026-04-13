@@ -18,8 +18,8 @@ class ApiChannel(LoopbackChannel):
         sender_name: str,
         text: str,
         conversation_id: str,
-    ) -> None:
-        await self.inject_text(
+    ):
+        return await self.inject_text(
             channel_message_id=request_id,
             channel_session_key=conversation_id,
             sender_id=client_id,
