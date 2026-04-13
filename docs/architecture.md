@@ -53,6 +53,11 @@ The normalized model must preserve:
 - edit and delete signals
 - raw payload provenance
 
+The sender model should also support an optional canonical identity reference.
+That field is not assigned by core transport logic. It is populated by an
+identity extension or parent application when different transport endpoints are
+known to represent the same real user.
+
 ### Session
 
 A session is a durable conversation record keyed by a kernel-generated UUID and
@@ -64,6 +69,10 @@ Session state exists to support:
 - history lookup
 - cross-restart continuity
 - correlation of interactive workflows
+
+Sessions are transport-local. A Telegram conversation and a WhatsApp
+conversation may belong to the same real user, but they are distinct sessions
+inside the kernel unless another layer links them.
 
 ## Lifecycle
 
@@ -98,14 +107,22 @@ execution.
 
 Outbound flow is also durable-first:
 
-1. handler produces outbound intent
-2. write outbox records per destination
+1. handler produces one outbound intent for one destination instance
+2. write one durable outbox record
 3. enforce instance-level send concurrency
 4. attempt delivery
 5. retry, fallback, or mark final state
 
 This ensures messages are not lost when the process restarts or a channel is
 temporarily unavailable.
+
+Per-instance delivery is the kernel primitive because replies, edits, deletes,
+delivery status, and interaction correlation all become ambiguous when a single
+record targets multiple transport instances.
+
+Higher-level fan-out or linked multi-channel delivery can still exist, but it
+should expand into separate per-instance outbound records above the core send
+primitive.
 
 ## Extension Boundary
 
@@ -118,6 +135,10 @@ Extensions are hooks around transport flow, not a second kernel. They may:
 
 They should not mutate the kernel into a workflow engine.
 
+Feature adaptation belongs behind explicit capability checks. A channel may
+render an interactive intent natively, degrade it deterministically, or reject
+it as unsupported. The kernel should not become a generic UX translation layer.
+
 ## Deployment Modes
 
 There are three public-facing ways to use the system, but only one kernel:
@@ -128,6 +149,11 @@ There are three public-facing ways to use the system, but only one kernel:
 
 The design target is zero special-case logic between these modes. They should
 compose from the same primitives rather than diverge into separate products.
+
+When embedded, `unigate` should still own its own workers, retries, sweepers,
+and lifecycle state. The host application provides integration points such as
+route mounting and startup/shutdown hooks, but the messaging engine remains one
+coherent runtime.
 
 ## Packaging Direction
 

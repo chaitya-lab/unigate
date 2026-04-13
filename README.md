@@ -27,6 +27,7 @@ Current priorities:
 - Zero special cases across embedded, standalone, and MCP-enabled deployments.
 - Durable delivery before convenience.
 - Multi-instance isolation by default.
+- Per-instance outbound delivery as the core primitive.
 - Open adapter model: new channels should not require core modification.
 
 ## Initial Scope
@@ -34,6 +35,7 @@ Current priorities:
 Phase 1 focuses on the universal kernel:
 
 - normalized inbound and outbound message models
+- one outbound intent per destination instance
 - durable inbox and outbox
 - session tracking
 - interaction correlation

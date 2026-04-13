@@ -52,10 +52,12 @@ Define the stable data contracts first:
 - sender and media models
 - interaction payloads
 - channel setup and health enums
+- sender canonical identity reference populated outside core
 
 Exit requirement:
 
 - contracts are typed, importable, and documented
+- per-instance outbound targeting is explicit in the contract shape
 
 ### Step 2: Durable Storage Interfaces
 
