@@ -20,6 +20,7 @@ Status today:
 - contracts are implemented
 - an in-memory minimum runtime is implemented
 - fake/internal channels support local end-to-end execution
+- api/web/websocket-style in-process channels support local end-to-end execution
 - restart-safe persistent backends are still pending
 
 ## Public Deliverables

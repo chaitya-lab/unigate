@@ -1,6 +1,6 @@
 import unittest
 
-from unigate import OutboundMessage
+from unigate import ApiChannel, OutboundMessage, WebChannel, WebSocketServerChannel
 from unigate.gate import Unigate
 from unigate.testing.fake_channel import FakeChannel
 
@@ -81,6 +81,67 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(channel_message_id.startswith("out-"))
         self.assertEqual(len(channel.sent_messages), 1)
         self.assertEqual(channel.sent_messages[0].text, "ping")
+
+    async def test_api_channel_round_trip(self) -> None:
+        gate = Unigate()
+        channel = ApiChannel()
+        gate.register_instance("public_api", channel)
+
+        @gate.on_message
+        def handle(message):
+            return gate.reply(message, text=f"api:{message.text}")
+
+        await channel.receive_request(
+            request_id="req-1",
+            client_id="client-1",
+            sender_name="Client One",
+            text="status",
+            conversation_id="conv-1",
+        )
+
+        self.assertEqual(len(channel.sent_messages), 1)
+        self.assertEqual(channel.sent_messages[0].text, "api:status")
+        self.assertEqual(channel.sent_messages[0].instance_id, "public_api")
+
+    async def test_web_channel_round_trip(self) -> None:
+        gate = Unigate()
+        channel = WebChannel()
+        gate.register_instance("site_chat", channel)
+
+        @gate.on_message
+        def handle(message):
+            return gate.reply(message, text=f"web:{message.text}")
+
+        await channel.receive_browser_message(
+            message_id="web-1",
+            browser_session_id="browser-1",
+            visitor_id="visitor-1",
+            visitor_name="Visitor One",
+            text="help",
+        )
+
+        self.assertEqual(len(channel.sent_messages), 1)
+        self.assertEqual(channel.sent_messages[0].text, "web:help")
+
+    async def test_websocket_channel_round_trip(self) -> None:
+        gate = Unigate()
+        channel = WebSocketServerChannel()
+        gate.register_instance("socket_gateway", channel)
+
+        @gate.on_message
+        def handle(message):
+            return gate.reply(message, text=f"ws:{message.text}")
+
+        await channel.receive_frame(
+            frame_id="frame-1",
+            connection_id="conn-1",
+            sender_id="peer-1",
+            sender_name="Peer One",
+            text="ping",
+        )
+
+        self.assertEqual(len(channel.sent_messages), 1)
+        self.assertEqual(channel.sent_messages[0].text, "ws:ping")
 
 
 if __name__ == "__main__":

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from ..channels.internal import InternalChannel
+from ..channels.loopback import LoopbackChannel
 
 
-class FakeChannel(InternalChannel):
+class FakeChannel(LoopbackChannel):
     """Internal-like channel with helpers for injecting inbound traffic."""
 
     channel_type = "fake"

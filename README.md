@@ -70,6 +70,9 @@ Implemented runtime pieces:
 - `Unigate` runtime orchestration
 - in-memory sessions, inbox, outbox, deduplication, and event bus
 - `InternalChannel`
+- `ApiChannel`
+- `WebChannel`
+- `WebSocketServerChannel`
 - `FakeChannel`
 - end-to-end tests using `unittest`
 
@@ -105,26 +108,26 @@ python -m unittest discover -s tests
 
 ```python
 from unigate import Unigate
-from unigate.testing.fake_channel import FakeChannel
+from unigate.channels import ApiChannel
 
 gate = Unigate()
-channel = FakeChannel()
-gate.register_instance("internal_app", channel)
+channel = ApiChannel()
+gate.register_instance("public_api", channel)
 
 @gate.on_message
 def handle(message):
     return gate.reply(message, text=f"echo: {message.text}")
 ```
 
-Then drive an inbound event with the fake channel:
+Then drive an inbound event through the API channel:
 
 ```python
-await channel.receive_text(
-    channel_message_id="in-1",
-    channel_session_key="chat-1",
-    sender_id="user-1",
+await channel.receive_request(
+    request_id="req-1",
+    client_id="user-1",
     sender_name="User One",
     text="hello",
+    conversation_id="chat-1",
 )
 ```
 
