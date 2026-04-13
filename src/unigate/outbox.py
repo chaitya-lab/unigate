@@ -39,6 +39,9 @@ class InMemoryOutbox:
                 record.delivered_channel_message_id = channel_message_id
                 return
 
+    def list_pending(self) -> list[OutboxRecord]:
+        return [record for record in self.records if record.status == "pending"]
+
 
 class SqliteOutbox:
     """SQLite-backed outbox storage."""
@@ -138,3 +141,31 @@ class SqliteOutbox:
             conn.commit()
         finally:
             conn.close()
+
+    def list_pending(self) -> list[OutboxRecord]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT outbound_id, destination_instance_id, session_id, status, text, metadata_json,
+                       created_at, delivered_channel_message_id
+                FROM outbox_records
+                WHERE status = 'pending'
+                ORDER BY created_at, rowid
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        return [
+            OutboxRecord(
+                outbound_id=row[0],
+                destination_instance_id=row[1],
+                session_id=row[2],
+                status=row[3],
+                text=row[4],
+                metadata=json.loads(row[5]),
+                created_at=datetime.fromisoformat(row[6]),
+                delivered_channel_message_id=row[7],
+            )
+            for row in rows
+        ]

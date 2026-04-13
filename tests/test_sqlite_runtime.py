@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from unigate import ApiChannel, Unigate
+from unigate.outbox import OutboxRecord
 
 
 class SqliteRuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -67,6 +68,32 @@ class SqliteRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(gate_two.outbox.records), 2)
             self.assertEqual(gate_two.inbox.records[1].status, "processed")
             self.assertEqual(gate_two.outbox.records[1].status, "delivered")
+
+    async def test_recover_replays_pending_outbox_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "unigate.db"
+
+            gate_one = Unigate(storage="sqlite", sqlite_path=str(db_path))
+            session = gate_one.sessions.get_or_create("public_api", "conv-1")[0]
+            gate_one.outbox.add(
+                OutboxRecord(
+                    outbound_id="out-1",
+                    destination_instance_id="public_api",
+                    session_id=session.session_id,
+                    status="pending",
+                    text="recover me",
+                )
+            )
+
+            gate_two = Unigate(storage="sqlite", sqlite_path=str(db_path))
+            channel = ApiChannel()
+            gate_two.register_instance("public_api", channel)
+
+            await gate_two.recover()
+
+            self.assertEqual(len(channel.sent_messages), 1)
+            self.assertEqual(channel.sent_messages[0].text, "recover me")
+            self.assertEqual(gate_two.outbox.records[0].status, "delivered")
 
 
 if __name__ == "__main__":

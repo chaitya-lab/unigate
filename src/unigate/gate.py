@@ -56,6 +56,12 @@ class Unigate:
             binder(self, instance_id)
         self.instances.add(instance_id, channel)
 
+    async def recover(self) -> None:
+        """Replay persisted pending outbox records."""
+
+        for record in self.outbox.list_pending():
+            await self._deliver_outbox_record(record)
+
     async def receive_text(
         self,
         *,
@@ -147,16 +153,15 @@ class Unigate:
     async def send(self, outbound: OutboundMessage) -> str:
         """Persist and deliver one outbound message."""
 
-        self.outbox.add(
-            OutboxRecord(
-                outbound_id=outbound.outbound_id,
-                destination_instance_id=outbound.destination_instance_id,
-                session_id=outbound.session_id,
-                status="pending",
-                text=outbound.text,
-                metadata=dict(outbound.metadata),
-            )
+        record = OutboxRecord(
+            outbound_id=outbound.outbound_id,
+            destination_instance_id=outbound.destination_instance_id,
+            session_id=outbound.session_id,
+            status="pending",
+            text=outbound.text,
+            metadata=dict(outbound.metadata),
         )
+        self.outbox.add(record)
         await self.events.emit(
             "message.delivery_pending",
             {
@@ -165,14 +170,24 @@ class Unigate:
                 "session_id": outbound.session_id,
             },
         )
-        channel = self.instances.get(outbound.destination_instance_id).channel
+        return await self._deliver_outbox_record(record)
+
+    async def _deliver_outbox_record(self, record: OutboxRecord) -> str:
+        channel = self.instances.get(record.destination_instance_id).channel
+        outbound = OutboundMessage(
+            destination_instance_id=record.destination_instance_id,
+            session_id=record.session_id,
+            outbound_id=record.outbound_id,
+            text=record.text,
+            metadata=dict(record.metadata),
+        )
         channel_message_id = await channel.send(outbound)
-        self.outbox.mark_delivered(outbound.outbound_id, channel_message_id)
+        self.outbox.mark_delivered(record.outbound_id, channel_message_id)
         await self.events.emit(
             "message.delivered",
             {
-                "outbound_id": outbound.outbound_id,
-                "instance_id": outbound.destination_instance_id,
+                "outbound_id": record.outbound_id,
+                "instance_id": record.destination_instance_id,
                 "channel_message_id": channel_message_id,
             },
         )

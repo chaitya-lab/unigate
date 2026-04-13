@@ -213,6 +213,9 @@ unigate print-config --config H:\path\to\unigate.toml
 unigate serve --config H:\path\to\unigate.json
 ```
 
+When `serve` starts, it replays persisted outbox records that are still marked
+`pending`.
+
 ## Relationship To The Larger System
 
 `unigate` is one component inside a larger agentic OS effort, but this

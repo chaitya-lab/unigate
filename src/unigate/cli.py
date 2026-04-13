@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib
 import json
 import sys
@@ -71,6 +72,7 @@ def _handle_serve(args: argparse.Namespace) -> int:
         return 1
 
     app = create_asgi_app(gate, prefix=str(prefix))
+    asyncio.run(gate.recover())
     uvicorn.run(app, host=str(host), port=port)
     return 0
 

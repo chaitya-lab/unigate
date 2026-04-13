@@ -24,6 +24,7 @@ Status today:
 - a mountable ASGI surface is implemented for HTTP and websocket access
 - config-driven startup and CLI commands are implemented
 - SQLite-backed sessions, inbox, outbox, and deduplication are implemented
+- minimum startup replay for pending outbox records is implemented
 - richer replay/recovery behavior is still pending
 
 ## Public Deliverables
