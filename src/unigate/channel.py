@@ -23,6 +23,7 @@ class KernelHandle(Protocol):
     """Small kernel surface exposed to adapters."""
 
     async def emit_event(self, event: KernelEvent) -> None: ...
+    async def ingest(self, instance_id: str, raw: dict[str, Any]) -> str: ...
 
 
 @dataclass(slots=True)
@@ -33,6 +34,15 @@ class RawRequest:
     body: bytes = b""
     query: dict[str, str] = field(default_factory=dict)
     path_params: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class SendResult:
+    """Normalized send outcome returned by adapters."""
+
+    success: bool
+    provider_message_id: str | None = None
+    error: str | None = None
 
 
 class BaseChannel(Protocol):
@@ -59,7 +69,7 @@ class BaseChannel(Protocol):
     def to_message(self, raw: dict[str, Any]) -> Message:
         """Convert transport payload to a universal message."""
 
-    async def from_message(self, msg: Message) -> None:
+    async def from_message(self, msg: Message) -> SendResult:
         """Convert universal message to transport send."""
 
     @property

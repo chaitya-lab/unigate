@@ -1,8 +1,12 @@
 """Public package surface for the 1.5 rewrite."""
 
 from .capabilities import ChannelCapabilities
-from .channel import BaseChannel, KernelHandle, RawRequest, SecureStore
+from .adapters import FakeWebhookAdapter, InternalAdapter
+from .channel import BaseChannel, KernelHandle, RawRequest, SecureStore, SendResult
+from .cli import main
+from .extensions import EventExtension, ExtensionDecision, InboundExtension, OutboundExtension
 from .events import KernelEvent
+from .instance_manager import InstanceManager, InstanceRuntime
 from .kernel import Exchange, RegisteredInstance
 from .lifecycle import HealthStatus, InstanceState, SetupResult, SetupStatus
 from .message import (
@@ -17,16 +21,35 @@ from .message import (
     Reaction,
     Sender,
 )
+from .runtime import UnigateASGIApp
+from .stores import (
+    InboxRecord,
+    InMemorySecureStore,
+    InMemoryStores,
+    NamespacedSecureStore,
+    OutboxRecord,
+    SQLiteStores,
+)
 
 __all__ = [
     "__version__",
     "Action",
+    "FakeWebhookAdapter",
     "BaseChannel",
     "ChannelCapabilities",
+    "EventExtension",
+    "ExtensionDecision",
     "Exchange",
+    "InMemorySecureStore",
+    "InMemoryStores",
     "FormField",
     "HealthStatus",
+    "InboundExtension",
+    "InstanceManager",
     "InstanceState",
+    "InstanceRuntime",
+    "InternalAdapter",
+    "InboxRecord",
     "Interactive",
     "InteractiveResponse",
     "InteractionType",
@@ -35,13 +58,20 @@ __all__ = [
     "MediaRef",
     "MediaType",
     "Message",
+    "NamespacedSecureStore",
+    "OutboxRecord",
+    "OutboundExtension",
     "RawRequest",
     "Reaction",
     "RegisteredInstance",
+    "SendResult",
+    "SQLiteStores",
     "SecureStore",
     "Sender",
     "SetupResult",
     "SetupStatus",
+    "UnigateASGIApp",
+    "main",
 ]
 
 __version__ = "0.2.0a0"
