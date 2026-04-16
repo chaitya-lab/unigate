@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -99,9 +100,6 @@ Available commands:
 /select - Send multi-choice select
 /dump - Show session info
 /help - Show this help
-
-Group testing:
-Use "Group" button to test group mode
             """.strip()
             return Message(
                 id=f"reply-{datetime.now(timezone.utc).timestamp()}",
@@ -146,6 +144,139 @@ Last response: {sess.get('last_response', 'none')}
         )
 
 
+HTML_PAGE = """<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Unigate Web Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #eee; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { color: #00d4ff; }
+        .chat { border: 1px solid #333; border-radius: 8px; height: 400px; overflow-y: auto; padding: 15px; background: #16213e; margin-bottom: 15px; }
+        .message { margin: 10px 0; padding: 10px; border-radius: 8px; }
+        .incoming { background: #0f3460; margin-right: 50px; }
+        .outgoing { background: #533483; margin-left: 50px; text-align: right; }
+        .sender { font-weight: bold; color: #00d4ff; font-size: 0.9em; }
+        .time { font-size: 0.7em; color: #888; }
+        .input-area { display: flex; gap: 10px; }
+        input { flex: 1; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #16213e; color: #fff; }
+        button { padding: 12px 24px; background: #00d4ff; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #00a8cc; }
+        .interactive { margin-top: 10px; padding: 15px; background: #1a1a2e; border-radius: 8px; }
+        .interactive button { margin: 5px; background: #ff9800; }
+        .interactive button:hover { background: #e68900; }
+        .status { color: #4caf50; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Unigate Web Test</h1>
+        <div class="status" id="status">Connecting...</div>
+        <div class="chat" id="chat"></div>
+        <div class="input-area">
+            <input type="text" id="message" placeholder="Type a message..." onkeypress="if(event.key==='Enter')sendMessage()">
+            <button onclick="sendMessage()">Send</button>
+            <button onclick="sendInteractive()" style="background:#ff9800;">Interactive</button>
+        </div>
+    </div>
+    <script>
+        const sessionId = localStorage.getItem('unigate_session') || (localStorage.setItem('unigate_session', Math.random().toString(36).substr(2, 9)));
+        let lastPoll = 0;
+        
+        async function sendMessage() {
+            const input = document.getElementById('message');
+            const text = input.value.trim();
+            if (!text) return;
+            input.value = '';
+            
+            await fetch('/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, session_id: sessionId })
+            });
+            poll();
+        }
+        
+        async function sendInteractive() {
+            await fetch('/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    text: 'Please choose:',
+                    session_id: sessionId,
+                    interactive: {
+                        type: 'confirm',
+                        interaction_id: 'test-' + Date.now(),
+                        prompt: 'Do you want to proceed?',
+                        options: ['yes', 'no'],
+                        timeout_seconds: 60
+                    }
+                })
+            });
+            poll();
+        }
+        
+        async function poll() {
+            try {
+                const res = await fetch('/poll?since=' + lastPoll);
+                const data = await res.json();
+                lastPoll = data.timestamp;
+                
+                data.messages.forEach(msg => {
+                    addMessage(msg);
+                });
+                
+                document.getElementById('status').textContent = 'Connected | Messages: ' + data.messages.length;
+            } catch (e) {
+                document.getElementById('status').textContent = 'Error: ' + e.message;
+            }
+        }
+        
+        function addMessage(msg) {
+            const chat = document.getElementById('chat');
+            const div = document.createElement('div');
+            div.className = 'message ' + (msg.direction === 'incoming' ? 'incoming' : 'outgoing');
+            
+            let html = '<div class="sender">' + (msg.sender_name || 'User') + '</div>';
+            html += '<div>' + (msg.text || '(interactive)') + '</div>';
+            html += '<div class="time">' + new Date(msg.timestamp * 1000).toLocaleTimeString() + '</div>';
+            
+            if (msg.interactive && msg.interactive.options) {
+                html += '<div class="interactive">';
+                msg.interactive.options.forEach(opt => {
+                    html += '<button onclick="respond(\'' + msg.id + '\',\'' + opt + '\')">' + opt + '</button>';
+                });
+                html += '</div>';
+            }
+            
+            div.innerHTML = html;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+        
+        async function respond(msgId, value) {
+            await fetch('/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    text: 'Response: ' + value,
+                    session_id: sessionId,
+                    interactive_response: { interaction_id: msgId, value: value }
+                })
+            });
+            poll();
+        }
+        
+        document.getElementById('status').textContent = 'Connected';
+        setInterval(poll, 1000);
+        poll();
+    </script>
+</body>
+</html>
+"""
+
+
 async def main() -> None:
     telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     use_telegram = "--telegram" in sys.argv and telegram_token
@@ -188,15 +319,13 @@ async def main() -> None:
     print("\n" + "=" * 50)
     print("Unigate Test Server")
     print("=" * 50)
-    print(f"\nWeb UI: http://localhost:8000/")
+    print("\nWeb UI: http://localhost:8000/")
     if use_telegram:
-        print(f"Telegram: Polling active for @{telegram_token[:20]}...")
+        print(f"Telegram: Polling active")
     print("\nCommands:")
     print("  /test - Test message")
     print("  /interactive - Send YES/NO confirm")
     print("  /select - Send multi-choice select")
-    print("  /dump - Show session info")
-    print("  /help - Show help")
     print("\nPress Ctrl+C to stop\n")
     
     async def outbox_loop() -> None:
@@ -207,27 +336,65 @@ async def main() -> None:
     outbox_task = asyncio.create_task(outbox_loop())
     
     try:
-        import aiohttp
-        from aiohttp import web as aiohttp_web
+        from aiohttp import web
         
-        async def handle_request(request: aiohttp_web.Request) -> aiohttp_web.Response:
-            instance_id = request.match_info.get("instance", "web")
+        async def handle_root(request: web.Request) -> web.Response:
+            return web.Response(text=HTML_PAGE, content_type='text/html')
+        
+        async def handle_send(request: web.Request) -> web.Response:
+            try:
+                data = await request.json()
+            except:
+                data = {}
             
-            if instance_id == "web":
-                await web_channel.handle_web(request.scope, request.receive, request._payload_writer._send)
+            msg_data = {
+                "id": f"web-{datetime.now(timezone.utc).timestamp()}",
+                "session_id": data.get("session_id", "default"),
+                "from_instance": "web",
+                "sender": {"id": "web-user", "name": "Web User"},
+                "text": data.get("text"),
+                "group_id": data.get("group_id"),
+                "bot_mentioned": data.get("bot_mentioned", True),
+                "thread_id": data.get("thread_id"),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
             
-            return aiohttp_web.Response(text="Not found", status=404)
+            if data.get("interactive"):
+                msg_data["interactive"] = data["interactive"]
+            
+            if data.get("interactive_response"):
+                msg_data["interactive_response"] = data["interactive_response"]
+            
+            await exchange.ingest("web", msg_data)
+            await asyncio.sleep(0.1)
+            await exchange.flush_outbox()
+            
+            return web.json_response({"ok": True})
         
-        app = aiohttp_web.Application()
-        app.router.add_route("{instance}/{{path:.*}}", handle_request)
-        app.router.add_route("/", handle_request)
+        async def handle_poll(request: web.Request) -> web.Response:
+            from urllib.parse import parse_qs
+            query = request.query
+            since = float(query.get('since', 0))
+            
+            new_messages = [m for m in web_channel._pending if m.get("timestamp", 0) > since]
+            
+            return web.json_response({
+                "messages": new_messages,
+                "timestamp": datetime.now(timezone.utc).timestamp(),
+            })
         
-        runner = aiohttp_web.AppRunner(app)
+        app = web.Application()
+        app.router.add_get("/", handle_root)
+        app.router.add_post("/send", handle_send)
+        app.router.add_get("/poll", handle_poll)
+        
+        runner = web.AppRunner(app)
         await runner.setup()
-        site = aiohttp_web.TCPSite(runner, "localhost", 8000)
+        site = web.TCPSite(runner, "localhost", 8000)
         await site.start()
         
         print("Server running on http://localhost:8000/")
+        print("Open this URL in your browser to test!\n")
         
         while True:
             await asyncio.sleep(1)
@@ -235,7 +402,6 @@ async def main() -> None:
     except ImportError:
         print("\n[aiohttp not installed]")
         print("Install with: pip install aiohttp")
-        print("Or run the bot only with: python -m unigate.channels.telegram")
     
     except KeyboardInterrupt:
         print("\nStopping...")
