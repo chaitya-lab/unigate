@@ -47,6 +47,7 @@ class Exchange:
         dedup: DedupStore,
         interactions: InteractionStore | None = None,
         max_concurrency: int = 64,
+        routing_config: dict | None = None,
     ) -> None:
         self.instances: dict[str, RegisteredInstance] = {}
         self.events: list[KernelEvent] = []
@@ -64,8 +65,16 @@ class Exchange:
         self._health_check_task: asyncio.Task | None = None
         self.instance_manager = InstanceManager()
         
+        # Routing engine
+        self._routing_engine = None
+        self._routing_enabled = False
+        
         # Wire up state change callback
         self.instance_manager.set_state_change_callback(self._handle_instance_state_change)
+        
+        # Initialize routing if config provided
+        if routing_config:
+            self.setup_routing(routing_config)
 
     def register_instance(
         self, 
@@ -82,6 +91,24 @@ class Exchange:
         registered = RegisteredInstance(instance_id=instance_id, channel=channel)
         self.instances[instance_id] = registered
         return registered
+
+    def setup_routing(self, config: dict) -> None:
+        """Set up routing engine with configuration."""
+        from .routing import RoutingEngine
+        self._routing_engine = RoutingEngine(self, config)
+        self._routing_enabled = True
+
+    def set_handler(self, handler: Handler) -> None:
+        """Set the message handler (for backward compatibility)."""
+        self._handler = handler
+
+    def get_routing_engine(self) -> "RoutingEngine | None":
+        """Get the routing engine."""
+        return self._routing_engine
+
+    def is_routing_enabled(self) -> bool:
+        """Check if routing is enabled."""
+        return self._routing_enabled
 
     def set_retry_policy(
         self,
@@ -167,6 +194,22 @@ class Exchange:
             if inbound is None:
                 await self.emit_event(KernelEvent(name="inbound.dropped", payload={"message_id": message.id}))
                 return "dropped"
+            
+            # Check if routing is enabled
+            if self._routing_enabled and self._routing_engine:
+                await self.emit_event(KernelEvent(name="routing.started", payload={"message_id": message.id}))
+                routed_messages = await self._routing_engine.route(inbound)
+                
+                for routed_msg in routed_messages:
+                    await self.enqueue_outbound(instance_id, routed_msg, source_message=inbound)
+                
+                await self.emit_event(KernelEvent(name="routing.complete", payload={
+                    "message_id": message.id, 
+                    "forwarded_count": len(routed_messages)
+                }))
+                return "ack"
+            
+            # Backward compatible: use handler
             if self._handler is None:
                 return "ack"
             produced = self._handler(inbound)
