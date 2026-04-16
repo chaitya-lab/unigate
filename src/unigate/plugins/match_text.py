@@ -1,4 +1,4 @@
-"""Text-based routing matcher."""
+"""Text matcher plugins."""
 
 from __future__ import annotations
 
@@ -6,16 +6,15 @@ import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ....message import Message
-
-from .base import RoutingMatcher
+    from ..message import Message
 
 
-class TextContainsMatcher(RoutingMatcher):
+class TextContainsMatcher:
     """Match if message text contains substring."""
-
+    
     name = "text_contains"
-
+    type = "match"
+    
     def match(self, msg: Message, value: str | list[str]) -> bool:
         if not msg.text:
             return False
@@ -25,11 +24,12 @@ class TextContainsMatcher(RoutingMatcher):
         return value.lower() in text_lower
 
 
-class TextPatternMatcher(RoutingMatcher):
+class TextPatternMatcher:
     """Match if message text matches regex pattern."""
-
+    
     name = "text_pattern"
-
+    type = "match"
+    
     def match(self, msg: Message, value: str) -> bool:
         if not msg.text:
             return False
@@ -39,11 +39,12 @@ class TextPatternMatcher(RoutingMatcher):
             return False
 
 
-class TextStartsWithMatcher(RoutingMatcher):
+class TextStartsWithMatcher:
     """Match if message text starts with prefix."""
-
-    name = "text_starts_with"
-
+    
+    name = "text_starts"
+    type = "match"
+    
     def match(self, msg: Message, value: str | list[str]) -> bool:
         if not msg.text:
             return False
@@ -52,12 +53,29 @@ class TextStartsWithMatcher(RoutingMatcher):
         return msg.text.startswith(value)
 
 
-class TextCommandMatcher(RoutingMatcher):
-    """Match if message text is a command (starts with /)."""
-
+class IsCommandMatcher:
+    """Match if message is a command (starts with /)."""
+    
     name = "is_command"
-
+    type = "match"
+    
     def match(self, msg: Message, value: bool = True) -> bool:
         if not msg.text:
             return False
         return msg.text.startswith("/") == value
+
+
+class SubjectContainsMatcher:
+    """Match if message subject contains substring."""
+    
+    name = "subject_contains"
+    type = "match"
+    
+    def match(self, msg: Message, value: str | list[str]) -> bool:
+        subject = msg.metadata.get("subject", "")
+        if not subject:
+            return False
+        subject_lower = subject.lower()
+        if isinstance(value, list):
+            return any(v.lower() in subject_lower for v in value)
+        return value.lower() in subject_lower

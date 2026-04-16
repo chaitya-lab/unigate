@@ -1,484 +1,329 @@
-# Unified Plugin Architecture
+# Unified Plugin System
 
 ## Overview
 
-Unigate uses a **plugin-based architecture** for extensibility. Plugins are reusable components discovered at runtime. User configuration (routing rules, instance settings) lives outside plugins and references them by name.
+Unigate uses a **flat plugin structure** with naming conventions. Each plugin file can contain one or more plugins of any type. The system auto-discovers plugins from configured directories.
 
 ---
 
 ## Plugin Types
 
-| Type | Description | Location | Base Class |
-|------|-------------|----------|------------|
-| `channel` | Receive/send messages | Built-in + user `plugins/channels/` | `BaseChannel` |
-| `transform` | Modify message content | `plugins/transforms/` | `TransformExtension` |
-| `transport` | Push to external services | `plugins/transports/` | `TransportProtocol` |
-| `matcher` | Routing condition logic | `plugins/matchers/` | `RoutingMatcher` |
+All plugins operate on the **universal Message format**. Channels convert raw external data → Message. Matchers, transforms, and transports work with Message.
 
-**Routing rules** = User config, NOT plugins.
-
----
-
-## Plugin Discovery
-
-### Built-in Plugins
-
-Ship with unigate:
-- `channels/web.py` - Generic HTTP webhook
-- `channels/telegram.py` - Telegram Bot API
-- `channels/webui.py` - Web UI testing interface
-
-### User Plugins
-
-Users specify plugin directories in config:
-
-```yaml
-unigate:
-  plugin_dirs:
-    channels: ./plugins/channels
-    transforms: ./plugins/transforms
-    transports: ./plugins/transports
-    matchers: ./plugins/matchers
-```
-
----
-
-## Channel Plugin
-
-### Purpose
-Receive and send messages to/from external platforms.
-
-### Base Class
-```python
-# src/unigate/channel.py
-class BaseChannel(ABC):
-    name: str
-    transport: str
-    auth_method: str
-    
-    async def setup(self) -> SetupResult: ...
-    async def to_message(self, raw: dict) -> Message: ...
-    async def from_message(self, msg: Message) -> dict: ...
-```
-
-### Example
-```python
-# plugins/channels/whatsapp.py
-from unigate import BaseChannel
-
-class WhatsAppChannel(BaseChannel):
-    name = "whatsapp"
-    transport = "rest_api"
-    auth_method = "bearer"
-    
-    async def setup(self):
-        return SetupResult(status=SetupStatus.READY)
-    
-    async def to_message(self, raw):
-        # Convert WhatsApp webhook payload to Message
-        ...
-```
-
----
-
-## Transform Plugin
-
-### Purpose
-Modify message content before routing/delivery.
-
-### Base Class
-```python
-# src/unigate/extensions.py
-class TransformExtension(Protocol):
-    name: str
-    
-    async def transform(self, msg: Message, config: dict) -> Message:
-        """Transform message. Return modified message."""
-        ...
-```
-
-### Example
-```python
-# plugins/transforms/truncate_160.py
-from unigate import Message, TransformExtension
-
-class Truncate160Transform(TransformExtension):
-    name = "truncate_160"
-    
-    async def transform(self, msg: Message, config: dict) -> Message:
-        max_len = config.get("max_length", 160)
-        if msg.text and len(msg.text) > max_len:
-            msg.text = msg.text[:max_len-3] + "..."
-        return msg
-```
-
-### Config Usage
-```yaml
-extensions:
-  - name: truncate_160
-    module: plugins.transforms.truncate_160
-    config:
-      max_length: 160
-
-routing:
-  rules:
-    - name: sms_alert
-      match:
-        from_channel: whatsapp
-      actions:
-        transforms:
-          - truncate_160
-        forward_to:
-          - sms
-```
-
----
-
-## Transport Plugin
-
-### Purpose
-Define HOW to deliver messages to destinations (beyond just calling channel.send).
-
-### Base Class
-```python
-# src/unigate/transports/base.py
-class TransportProtocol(Protocol):
-    name: str
-    async def send(self, msg: Message, config: dict) -> bool: ...
-```
-
-### Built-in Transports
-
-```python
-# src/unigate/transports/
-├── __init__.py
-├── http.py      # HTTP POST/GET webhook
-├── ftp.py       # FTP upload
-├── websocket.py # WebSocket push
-├── sftp.py      # Secure FTP
-├── email.py     # SMTP email send
-└── sms.py       # SMS API (Twilio, etc.)
-```
-
-### Example: FTP Transport
-```python
-# plugins/transports/ftp_push.py
-from unigate import Message
-from unigate.transports.base import TransportProtocol
-
-class FTPTransport(TransportProtocol):
-    name = "ftp_push"
-    
-    async def send(self, msg: Message, config: dict) -> bool:
-        host = config["host"]
-        username = config["username"]
-        password = config["password"]
-        path = config.get("path", "/")
-        
-        # Upload msg.text or msg.media to FTP
-        ...
-        return True
-```
-
-### Config Usage
-```yaml
-transports:
-  - name: ftp_push
-    module: plugins.transports.ftp_push
-    config:
-      host: ftp.example.com
-      username: !env:FTP_USER
-      password: !env:FTP_PASS
-      path: /uploads
-
-instances:
-  ftp_archive:
-    type: transport
-    transport: ftp_push
-    config:
-      path: /archive
-
-routing:
-  rules:
-    - name: archive_to_ftp
-      match:
-        from_channel: email
-        has_attachment: true
-      actions:
-        forward_to:
-          - ftp_archive
-```
-
----
-
-## Matcher Plugin
-
-### Purpose
-Extensible conditions for routing rule matching.
-
-### Base Class
-```python
-# src/unigate/routing/matchers/base.py
-class RoutingMatcher(Protocol):
-    name: str  # e.g., "from_channel", "text_contains", "has_attachment"
-    
-    def match(self, msg: Message, value: Any) -> bool:
-        """Return True if message matches condition."""
-        ...
-```
-
-### Built-in Matchers
-
-| Matcher | Config Key | Example |
-|---------|------------|---------|
-| `channel_matcher` | `from_channel` | `from_channel: telegram` |
-| `sender_matcher` | `sender_pattern` | `sender_pattern: "*@company.com"` |
-| `text_matcher` | `text_contains`, `text_pattern` | `text_contains: "help"` |
-| `subject_matcher` | `subject_contains` | `subject_contains: "URGENT"` |
-| `context_matcher` | `group_id`, `thread_id` | `group_id_pattern: "support-*"` |
-| `media_matcher` | `has_media`, `has_attachment` | `has_attachment: true` |
-| `time_matcher` | `day_of_week`, `hour_of_day` | `hour_of_day: 9-17` |
-| `metadata_matcher` | `metadata.key` | `metadata.priority: high` |
-
-### Example: Custom Matcher
-```python
-# plugins/matchers/day_of_week.py
-from datetime import datetime
-from unigate import Message
-from unigate.routing.matchers.base import RoutingMatcher
-
-class DayOfWeekMatcher(RoutingMatcher):
-    name = "day_of_week"
-    
-    def match(self, msg: Message, value: str | list[str]) -> bool:
-        days = value if isinstance(value, list) else [value]
-        current_day = msg.ts.strftime("%A").lower()
-        return current_day in [d.lower() for d in days]
-```
-
-### Config Usage
-```yaml
-routing:
-  rules:
-    - name: business_hours
-      match:
-        day_of_week: [monday, tuesday, wednesday, thursday, friday]
-        hour_of_day: 9-17
-      actions:
-        forward_to:
-          - support_team
-```
-
----
-
-## Routing Rules = Config (Not Plugins)
-
-### Location
-User-defined. Not in plugins folder.
-
-### Recommended Structure
-```
-my_app/
-├── unigate.yaml              # Main config
-├── config/
-│   └── routing/
-│       ├── default.yaml      # Default routing rules
-│       ├── production.yaml   # Production overrides
-│       └── test.yaml         # Test rules
-└── plugins/                  # Plugin code
-    ├── channels/
-    ├── transforms/
-    ├── transports/
-    └── matchers/
-```
-
-### Example Config
-```yaml
-# unigate.yaml
-unigate:
-  plugin_dirs:
-    channels: ./plugins/channels
-    transforms: ./plugins/transforms
-    transports: ./plugins/transports
-    matchers: ./plugins/matchers
-  default_instance: inbox
-
-instances:
-  telegram:
-    type: channel
-    channel: telegram
-    token: !env:TELEGRAM_TOKEN
-  
-  email_in:
-    type: channel
-    channel: web
-    auth: bearer
-  
-  handler:
-    type: handler
-  
-  inbox:
-    type: internal
-
-routing:
-  rules_file: ./config/routing/default.yaml
-
-extensions:
-  - name: truncate_160
-    module: plugins.transforms.truncate_160
-  - name: extract_subject
-    module: plugins.transforms.extract_subject
-```
-
-```yaml
-# config/routing/default.yaml
-rules:
-  - name: email_to_telegram
-    priority: 100
-    match:
-      from_channel: email_in
-      subject_contains: "urgent"
-    actions:
-      transforms:
-        - extract_subject
-      forward_to:
-        - telegram
-        - handler
-
-  - name: all_to_handler
-    priority: 1000
-    match: {}  # Match everything
-    actions:
-      forward_to:
-        - handler
-```
+| Type | Interface | Description |
+|------|----------|-------------|
+| **channel** | `ChannelPlugin` | Receives raw input, converts to Message |
+| **match** | `MatcherPlugin` | Evaluates Message → bool (should route?) |
+| **transform** | `TransformPlugin` | Modifies Message → Message |
+| **transport** | `TransportPlugin` | Delivers Message to external service |
 
 ---
 
 ## File Structure
 
 ```
-unigate/
-├── src/unigate/
+src/unigate/
+├── __init__.py
+├── message.py           # Universal message format
+├── channel.py           # BaseChannel (for channels)
+├── plugins/             # All plugin files (flat structure)
 │   ├── __init__.py
-│   ├── channel.py              # BaseChannel
-│   ├── channels/               # Built-in channels
-│   │   ├── __init__.py
-│   │   ├── web.py
-│   │   ├── telegram.py
-│   │   └── webui.py
-│   │
-│   ├── extensions.py            # Extension protocols (Inbound, Outbound, Event)
-│   ├── transforms/              # Built-in transforms
-│   │   ├── __init__.py
-│   │   ├── base.py              # TransformExtension base
-│   │   ├── truncate.py
-│   │   ├── extract_subject.py
-│   │   └── add_metadata.py
-│   │
-│   ├── transports/              # Built-in transports
-│   │   ├── __init__.py
-│   │   ├── base.py              # TransportProtocol
-│   │   ├── http.py
-│   │   ├── ftp.py
-│   │   ├── websocket.py
-│   │   ├── email.py
-│   │   └── sms.py
-│   │
-│   ├── routing/
-│   │   ├── __init__.py
-│   │   ├── engine.py            # RoutingEngine
-│   │   ├── rule.py              # Rule definition
-│   │   ├── matchers/            # Built-in matchers
-│   │   │   ├── __init__.py
-│   │   │   ├── base.py          # RoutingMatcher base
-│   │   │   ├── channel.py
-│   │   │   ├── sender.py
-│   │   │   ├── text.py
-│   │   │   ├── subject.py
-│   │   │   ├── context.py
-│   │   │   ├── media.py
-│   │   │   └── time.py
-│   │   └── loader.py            # Load rules from config
-│   │
-│   ├── registry.py              # Plugin discovery
-│   └── ...
-│
-├── plugins/                     # Example user plugins (in examples/)
-│   ├── channels/
-│   ├── transforms/
-│   ├── transports/
-│   └── matchers/
-│
-├── examples/
-│   └── unigate.yaml.example
-│
-├── config/                      # Example routing configs
-│   └── routing/
-│       └── default.yaml.example
-│
-└── docs/
-    └── plugin-architecture.md
+│   ├── channel_web.py
+│   ├── channel_telegram.py
+│   ├── channel_whatsapp.py
+│   ├── match_from.py
+│   ├── match_text.py
+│   ├── match_sender.py
+│   ├── match_media.py
+│   ├── match_time.py
+│   ├── transform_truncate.py
+│   ├── transform_extract.py
+│   ├── transform_add.py
+│   ├── transport_http.py
+│   ├── transport_ftp.py
+│   └── transport_ws.py
+└── ...
+```
+
+**User plugins directory:**
+```
+my_app/
+├── plugins/             # Flat structure, naming convention
+│   ├── channel_whatsapp.py
+│   ├── match_myrule.py
+│   └── transform_special.py
+└── unigate.yaml
 ```
 
 ---
 
-## Implementation Checklist
+## Plugin Interfaces
 
-### Phase 1: Core Plugin System
-- [x] `BaseChannel` and channel registry
-- [x] Plugin discovery via `plugin_dirs`
-- [x] Entry point loading
+### Channel Plugin
+```python
+class ChannelPlugin:
+    name: str           # Plugin identifier
+    type: str = "channel"
+    
+    async def receive(self, raw: dict) -> Message | None:
+        """Convert raw input to Message."""
+        ...
+    
+    async def send(self, msg: Message) -> dict | None:
+        """Convert Message to platform-specific format."""
+        ...
+```
 
-### Phase 2: Transform Plugins
-- [ ] `TransformExtension` base class
-- [ ] Built-in transforms (truncate, extract_subject, add_metadata)
-- [ ] Config-based transform loading
+### Matcher Plugin
+```python
+class MatcherPlugin:
+    name: str           # e.g., "from", "text_contains", "has_attachment"
+    type: str = "match"
+    
+    def match(self, msg: Message, value: Any) -> bool:
+        """Check if message matches condition."""
+        ...
+```
 
-### Phase 3: Transport Plugins
-- [ ] `TransportProtocol` base class
-- [ ] Built-in transports (HTTP, FTP, WebSocket, Email, SMS)
-- [ ] Instance type: `transport`
+### Transform Plugin
+```python
+class TransformPlugin:
+    name: str           # e.g., "truncate", "extract_subject"
+    type: str = "transform"
+    
+    async def transform(self, msg: Message, config: dict) -> Message:
+        """Modify message. Return modified message."""
+        ...
+```
 
-### Phase 4: Matcher Plugins
-- [ ] `RoutingMatcher` base class
-- [ ] Built-in matchers (channel, sender, text, subject, context, media, time)
-- [ ] Matcher registry
-- [ ] Custom matcher support
-
-### Phase 5: Routing Engine Integration
-- [x] Routing engine with rule evaluation
-- [ ] Integration with transforms
-- [ ] Integration with transports
-- [ ] Integration with matchers
-- [ ] `rules_file` loading
-
-### Phase 6: Documentation & Examples
-- [ ] Update docs/plugin-architecture.md
-- [ ] Example plugins in `examples/plugins/`
-- [ ] Example routing configs in `examples/config/`
+### Transport Plugin
+```python
+class TransportPlugin:
+    name: str           # e.g., "http", "ftp", "websocket"
+    type: str = "transport"
+    
+    async def send(self, msg: Message, config: dict) -> bool:
+        """Send message externally. Return success."""
+        ...
+```
 
 ---
 
-## Backward Compatibility
+## Naming Convention
 
-Existing config format still works:
+Files use prefixes for organization (not folders):
 
-```yaml
-instances:
-  telegram:
-    type: telegram
-    token: !env:TELEGRAM_TOKEN
+| Prefix | Example | Contains |
+|--------|---------|----------|
+| `channel_` | `channel_telegram.py` | Channel plugins |
+| `match_` | `match_text.py` | Matcher plugins |
+| `transform_` | `transform_truncate.py` | Transform plugins |
+| `transport_` | `transport_ftp.py` | Transport plugins |
+
+A single file can contain multiple plugins:
+```python
+# channel_whatsapp.py - Can contain:
+# - ChannelPlugin (WhatsAppChannel)
+# - TransformPlugin (whatsapp_cleanup)
+# - MatcherPlugin (whatsapp_template)
 ```
 
-Becomes:
+---
+
+## Auto-Discovery
+
+Plugins are auto-discovered from configured directories:
 
 ```yaml
-instances:
-  telegram:
-    type: channel
-    channel: telegram
-    token: !env:TELEGRAM_TOKEN
+unigate:
+  plugin_dirs:
+    - ./plugins
+    - ./custom_plugins
 ```
 
-Both formats supported initially, deprecate old format in v0.3.0.
+Discovery process:
+1. Scan each directory for `*.py` files
+2. Import each module
+3. Find classes inheriting from plugin base types
+4. Register by `name` attribute
+
+---
+
+## Routing Rules (Config, Not Plugins)
+
+Routing rules reference plugins by name:
+
+```yaml
+# unigate.yaml
+routing:
+  rules:
+    - name: urgent_to_sms
+      match:
+        from: telegram
+        text_contains: URGENT
+      transform:
+        - truncate_160
+      forward_to:
+        - sms_channel
+        - handler
+```
+
+```yaml
+# Custom routing rules file
+rules:
+  - name: whatsapp_attach_to_ftp
+    match:
+      from: whatsapp
+      has_attachment: true
+    transform:
+      - whatsapp_save_attachment
+    forward_to:
+      - ftp_archive
+```
+
+---
+
+## Built-in Plugins
+
+### Channels
+| Plugin | File | Description |
+|--------|------|-------------|
+| web | `channel_web.py` | HTTP webhook receiver |
+| telegram | `channel_telegram.py` | Telegram Bot API |
+| webui | `channel_webui.py` | Web UI for testing |
+
+### Matchers
+| Plugin | File | Description |
+|--------|------|-------------|
+| from | `match_from.py` | Match by source channel |
+| sender | `match_sender.py` | Match by sender ID/pattern |
+| text_contains | `match_text.py` | Match text content |
+| subject_contains | `match_text.py` | Match email subject |
+| has_media | `match_media.py` | Match by media presence |
+| day_of_week | `match_time.py` | Match by day/time |
+
+### Transforms
+| Plugin | File | Description |
+|--------|------|-------------|
+| truncate | `transform_truncate.py` | Truncate text length |
+| extract_subject | `transform_extract.py` | Extract email subject |
+| add_metadata | `transform_add.py` | Add metadata fields |
+
+### Transports
+| Plugin | File | Description |
+|--------|------|-------------|
+| http | `transport_http.py` | HTTP webhook push |
+| ftp | `transport_ftp.py` | FTP/SFTP upload |
+| websocket | `transport_ws.py` | WebSocket push |
+
+---
+
+## Example: Creating a Custom Channel
+
+```python
+# plugins/channel_mychannel.py
+from unigate import Message, Sender, ChannelPlugin
+from datetime import datetime, timezone
+
+class MyChannelPlugin(ChannelPlugin):
+    name = "mychannel"
+    
+    async def receive(self, raw: dict) -> Message | None:
+        if raw.get("event") != "message":
+            return None
+        
+        return Message(
+            id=raw["message_id"],
+            session_id=raw.get("session_id", raw["user_id"]),
+            from_instance=self.name,
+            sender=Sender(
+                platform_id=raw["user_id"],
+                name=raw.get("user_name", "User"),
+            ),
+            ts=datetime.now(timezone.utc),
+            text=raw.get("text", ""),
+        )
+    
+    async def send(self, msg: Message) -> dict | None:
+        return {
+            "user_id": msg.to[0] if msg.to else None,
+            "text": msg.text,
+        }
+```
+
+---
+
+## Example: Creating a Custom Transform
+
+```python
+# plugins/transform_company_prefix.py
+from unigate import Message, TransformPlugin
+
+class CompanyPrefixTransform(TransformPlugin):
+    name = "company_prefix"
+    
+    async def transform(self, msg: Message, config: dict) -> Message:
+        prefix = config.get("prefix", "[Company]")
+        if msg.text:
+            msg.text = f"{prefix} {msg.text}"
+        return msg
+```
+
+---
+
+## Example: Creating a Custom Matcher
+
+```python
+# plugins/match_priority.py
+from unigate import Message, MatcherPlugin
+
+class PriorityMatcher(MatcherPlugin):
+    name = "priority"
+    
+    def match(self, msg: Message, value: str) -> bool:
+        return msg.metadata.get("priority") == value
+```
+
+Config usage:
+```yaml
+rules:
+  - name: high_priority
+    match:
+      priority: high
+    forward_to:
+      - pagerduty
+```
+
+---
+
+## Installation
+
+### Built-in plugins
+Included with unigate, auto-loaded.
+
+### Custom plugins
+1. Create files in your plugins directory
+2. Register directory in config:
+```yaml
+unigate:
+  plugin_dirs:
+    - ./plugins
+```
+
+### Distribution (pip)
+Create a package:
+```
+my-unigate-plugins/
+├── my_unigate_plugins/
+│   ├── __init__.py
+│   ├── channel_slack.py
+│   └── match_slack.py
+└── setup.py
+```
+
+Install and use:
+```yaml
+unigate:
+  plugin_dirs:
+    - my_unigate_plugins/
+```

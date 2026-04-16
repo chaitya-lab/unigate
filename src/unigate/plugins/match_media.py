@@ -1,42 +1,63 @@
-"""Media-based routing matcher."""
+"""Media matcher plugins."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ....message import Message
-
-from .base import RoutingMatcher
+    from ..message import Message
 
 
-class HasMediaMatcher(RoutingMatcher):
+class HasMediaMatcher:
     """Match if message has media attachments."""
-
+    
     name = "has_media"
-
+    type = "match"
+    
     def match(self, msg: Message, value: bool = True) -> bool:
         has_media = len(msg.media) > 0
         return has_media == value
 
 
-class HasAttachmentMatcher(RoutingMatcher):
-    """Match if message has file attachments (non-image/video/audio)."""
-
+class HasAttachmentMatcher:
+    """Match if message has file attachments."""
+    
     name = "has_attachment"
-
+    type = "match"
+    
     def match(self, msg: Message, value: bool = True) -> bool:
-        has_attachment = any(
-            m.type.value in ("file", "document") for m in msg.media
-        )
+        has_attachment = any(m.type.value in ("file", "document") for m in msg.media)
         return has_attachment == value
 
 
-class MediaTypeMatcher(RoutingMatcher):
-    """Match based on media type."""
+class HasImageMatcher:
+    """Match if message has image attachments."""
+    
+    name = "has_image"
+    type = "match"
+    
+    def match(self, msg: Message, value: bool = True) -> bool:
+        has_image = any(m.type.value == "image" for m in msg.media)
+        return has_image == value
 
+
+class HasVideoMatcher:
+    """Match if message has video attachments."""
+    
+    name = "has_video"
+    type = "match"
+    
+    def match(self, msg: Message, value: bool = True) -> bool:
+        has_video = any(m.type.value == "video" for m in msg.media)
+        return has_video == value
+
+
+class MediaTypeMatcher:
+    """Match by media type."""
+    
     name = "media_type"
-
+    type = "match"
+    
     def match(self, msg: Message, value: str | list[str]) -> bool:
         if not msg.media:
             return False
@@ -44,23 +65,3 @@ class MediaTypeMatcher(RoutingMatcher):
         if isinstance(value, list):
             return bool(media_types & set(value))
         return value in media_types
-
-
-class HasImageMatcher(RoutingMatcher):
-    """Match if message has image attachments."""
-
-    name = "has_image"
-
-    def match(self, msg: Message, value: bool = True) -> bool:
-        has_image = any(m.type.value == "image" for m in msg.media)
-        return has_image == value
-
-
-class HasVideoMatcher(RoutingMatcher):
-    """Match if message has video attachments."""
-
-    name = "has_video"
-
-    def match(self, msg: Message, value: bool = True) -> bool:
-        has_video = any(m.type.value == "video" for m in msg.media)
-        return has_video == value

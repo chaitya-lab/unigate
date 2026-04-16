@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from ..message import Message
-from ..transforms import get_transform_registry
+from ..plugins.base import get_registry
 from .rule import MatchCondition, RoutingAction, RoutingRule, load_rules_from_config
 
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ class RoutingEngine:
     Flow:
     1. Message arrives from channel
     2. Find matching rule (priority order)
-    3. Run extensions (transforms)
+    3. Run transforms
     4. Forward to destinations
     """
 
@@ -33,7 +33,7 @@ class RoutingEngine:
         self.config = config or {}
         self._rules: list[RoutingRule] = []
         self._extensions: dict[str, Any] = {}
-        self._transform_registry = get_transform_registry()
+        self._plugin_registry = get_registry()
         self._default_action: str = "keep"
         self._default_instance: str | None = "default"
         self._unprocessed_retention_days: int = 7
@@ -166,11 +166,11 @@ class RoutingEngine:
         message: Message, 
         extension_names: list[str]
     ) -> Message:
-        """Apply extensions in order to the message."""
+        """Apply transforms in order to the message."""
         result = message
         
         for ext_name in extension_names:
-            transform = self._transform_registry.create(ext_name)
+            transform = self._plugin_registry.create_transform(ext_name)
             if transform:
                 try:
                     config = self._extensions.get(ext_name, {}).get("config", {})

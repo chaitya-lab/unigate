@@ -13,21 +13,21 @@ if TYPE_CHECKING:
 class RuleMatcher:
     """Matches messages against rule conditions using plugin matchers."""
     
-    _matcher_registry: Any = None
+    _plugin_registry: Any = None
     
     @classmethod
     def _get_registry(cls):
-        """Get matcher registry (lazy load)."""
-        if cls._matcher_registry is None:
-            from .matchers import get_matcher_registry
-            cls._matcher_registry = get_matcher_registry()
-        return cls._matcher_registry
+        """Get plugin registry (lazy load)."""
+        if cls._plugin_registry is None:
+            from ..plugins.base import get_registry
+            cls._plugin_registry = get_registry()
+        return cls._plugin_registry
     
     @classmethod
     def get_matcher(cls, name: str):
         """Get a matcher instance by name."""
         registry = cls._get_registry()
-        return registry.create(name)
+        return registry.create_match(name)
     
     @staticmethod
     def match_channel(message: "Message", pattern: str | None) -> bool:

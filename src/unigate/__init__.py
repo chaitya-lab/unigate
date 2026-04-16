@@ -30,15 +30,18 @@ from .message import (
     Reaction,
     Sender,
 )
-from .registry import PluginRegistry, get_registry, register_plugin_dirs
+from .plugins.base import (
+    PluginRegistry,
+    PluginType,
+    ChannelPlugin,
+    MatcherPlugin,
+    TransformPlugin,
+    TransportPlugin,
+    get_registry,
+    register_plugin_dirs,
+)
 from .resilience import CircuitBreaker, CircuitState, RetryPolicy
 from .routing import RoutingEngine, RoutingRule, MatchCondition, RoutingAction
-from .routing.matchers import (
-    get_matcher_registry,
-    MatcherRegistry,
-    RoutingMatcher,
-)
-from .routing.matchers.base import RoutingMatcher
 from .runtime import UnigateASGIApp
 from .stores import (
     DeadLetterRecord,
@@ -51,16 +54,6 @@ from .stores import (
     SQLiteStores,
 )
 from .testing import FakeChannel, TestKit
-from .transforms import (
-    TransformExtension,
-    TransformRegistry,
-    get_transform_registry,
-)
-from .transports import (
-    TransportProtocol,
-    TransportRegistry,
-    get_transport_registry,
-)
 
 __all__ = [
     "__version__",
@@ -69,6 +62,7 @@ __all__ = [
     "BaseChannel",
     "BearerTokenWebChannel",
     "ChannelCapabilities",
+    "ChannelPlugin",
     "CircuitBreaker",
     "CircuitState",
     "create_extension",
@@ -79,10 +73,7 @@ __all__ = [
     "FakeChannel",
     "FakeWebhookAdapter",
     "FormField",
-    "get_matcher_registry",
     "get_registry",
-    "get_transform_registry",
-    "get_transport_registry",
     "HealthStatus",
     "InMemorySecureStore",
     "InMemoryStores",
@@ -100,7 +91,7 @@ __all__ = [
     "KernelHandle",
     "load_config",
     "load_yaml",
-    "MatcherRegistry",
+    "MatcherPlugin",
     "MatchCondition",
     "MediaRef",
     "MediaType",
@@ -110,6 +101,7 @@ __all__ = [
     "OutboundExtension",
     "PendingInteractionRecord",
     "PluginRegistry",
+    "PluginType",
     "RawRequest",
     "Reaction",
     "RegisteredInstance",
@@ -117,7 +109,6 @@ __all__ = [
     "RetryPolicy",
     "RoutingAction",
     "RoutingEngine",
-    "RoutingMatcher",
     "RoutingRule",
     "SecureStore",
     "SendResult",
@@ -127,10 +118,8 @@ __all__ = [
     "SQLiteStores",
     "TelegramChannel",
     "TestKit",
-    "TransformExtension",
-    "TransformRegistry",
-    "TransportProtocol",
-    "TransportRegistry",
+    "TransformPlugin",
+    "TransportPlugin",
     "Unigate",
     "UnigateASGIApp",
     "WebChannel",
