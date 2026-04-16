@@ -100,6 +100,7 @@ class StorageRuntimeTests(unittest.IsolatedAsyncioTestCase):
         adapter = InternalAdapter("inst", secure.for_instance("inst"), exchange)
         exchange.register_instance("inst", adapter)
         exchange.set_retry_policy("inst", max_attempts=1, retry_base_seconds=2, retry_max_seconds=30)
+        await exchange.instance_manager.ensure_started("inst")
 
         adapter.fail_next_send = True
         outbound = Message(

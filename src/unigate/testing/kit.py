@@ -67,6 +67,8 @@ class TestKit:
 
     async def start(self) -> None:
         self._running = True
+        for instance_id in self._channels:
+            await self._exchange.instance_manager.ensure_started(instance_id)
         for channel in self._channels.values():
             await channel.start()
 
