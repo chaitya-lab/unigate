@@ -352,6 +352,13 @@ class InMemoryStores(InboxStore, OutboxStore, SessionStore, DedupStore, Interact
     async def get_interaction(self, session_id: str, instance_id: str) -> PendingInteractionRecord | None:
         key = f"{session_id}:{instance_id}"
         return self.pending_interactions.get(key)
+    
+    async def get_interaction_by_session(self, session_id: str) -> PendingInteractionRecord | None:
+        """Get pending interaction for a session regardless of instance."""
+        for record in self.pending_interactions.values():
+            if record.session_id == session_id:
+                return record
+        return None
 
     async def remove_interaction(self, interaction_id: str) -> None:
         to_remove = [
@@ -1147,6 +1154,17 @@ class FileStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionS
     async def get_interaction(self, session_id: str, instance_id: str) -> PendingInteractionRecord | None:
         key = f"{session_id}:{instance_id}"
         return self._pending_interactions.get(key)
+    
+    async def get_interaction_by_session(self, session_id: str) -> PendingInteractionRecord | None:
+        """Get pending interaction for a session regardless of instance.
+        
+        This handles cross-instance responses where user starts on one channel
+        but responds on another (e.g., starts on SMS, responds on Web).
+        """
+        for record in self._pending_interactions.values():
+            if record.session_id == session_id:
+                return record
+        return None
     
     async def remove_interaction(self, interaction_id: str) -> None:
         to_remove = [k for k, v in self._pending_interactions.items() if v.interaction_id == interaction_id]

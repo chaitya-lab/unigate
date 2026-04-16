@@ -202,10 +202,22 @@ class Exchange:
             )
             await self.emit_event(KernelEvent(name="inbox.persisted", payload={"message_id": message.id}))
             await self._sessions.set_origin(message.session_id, instance_id)
-            if self._interactions is not None:
+            if self._interactions is not None and message.interactive:
+                # Check for pending interaction for this session (try both by instance and by session)
                 pending = await self._interactions.get_interaction(message.session_id, instance_id)
-                if pending is not None and message.interactive:
-                    message.interactive.response = message.interactive.response
+                if pending is None:
+                    pending = await self._interactions.get_interaction_by_session(message.session_id)
+                if pending is not None:
+                    # Populate the response from raw data
+                    from .message import InteractiveResponse
+                    if message.interactive.response is None:
+                        raw_resp = message.raw.get("interactive_response", {})
+                        message.interactive.response = InteractiveResponse(
+                            interaction_id=pending.interaction_id,
+                            type=message.interactive.type or "unknown",
+                            value=raw_resp.get("value"),
+                            raw=raw_resp,
+                        )
                     await self._interactions.remove_interaction(pending.interaction_id)
                     await self.emit_event(
                         KernelEvent(
@@ -293,15 +305,16 @@ class Exchange:
             timeout_at = None
             if prepared.interactive.timeout_seconds:
                 timeout_at = datetime.now(UTC) + timedelta(seconds=prepared.interactive.timeout_seconds)
-            await self._interactions.put_interaction(
-                PendingInteractionRecord(
-                    interaction_id=prepared.interactive.interaction_id,
-                    session_id=message.session_id,
-                    instance_id=from_instance,
-                    timeout_at=timeout_at,
-                    created_at=datetime.now(UTC),
+            for destination in destinations:
+                await self._interactions.put_interaction(
+                    PendingInteractionRecord(
+                        interaction_id=prepared.interactive.interaction_id,
+                        session_id=message.session_id,
+                        instance_id=destination,  # Store with destination instance
+                        timeout_at=timeout_at,
+                        created_at=datetime.now(UTC),
+                    )
                 )
-            )
             await self.emit_event(
                 KernelEvent(
                     name="interaction.pending",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from .capabilities import ChannelCapabilities
 from .channel import SendResult
@@ -35,6 +36,23 @@ class InternalAdapter:
         return None
 
     def to_message(self, raw: dict[str, Any]) -> Message:
+        # Parse interactive response if present
+        interactive = None
+        if raw.get("interactive_response"):
+            from .message import Interactive, InteractiveResponse
+            ir = raw["interactive_response"]
+            interactive = Interactive(
+                interaction_id=ir.get("interaction_id", str(uuid4())),
+                type=ir.get("type", "confirm"),
+                prompt="",
+                response=InteractiveResponse(
+                    interaction_id=ir.get("interaction_id", ""),
+                    type=ir.get("type", "confirm"),
+                    value=ir.get("value"),
+                    raw=ir,
+                ) if ir else None,
+            )
+        
         return Message(
             id=str(raw.get("id", "msg")),
             session_id=str(raw.get("session_id", "session-1")),
@@ -44,6 +62,7 @@ class InternalAdapter:
             to=list(raw.get("to", [])),
             text=raw.get("text"),
             bot_mentioned=bool(raw.get("bot_mentioned", True)),
+            interactive=interactive,
             raw=raw,
         )
 
