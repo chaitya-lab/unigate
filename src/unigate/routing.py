@@ -229,10 +229,20 @@ class RuleMatcher:
     def _match_fallback(cls, key: str, message: Message, value: Any) -> bool:
         if key == "from_channel":
             return cls.match_channel(message, value)
+        elif key == "from_instance":
+            return getattr(message, "from_instance", None) == value
         elif key == "sender_pattern":
             sender = getattr(message, "sender", None)
             sender_id = getattr(sender, "platform_id", None) if sender else None
             return cls.match_glob(sender_id, value)
+        elif key == "sender_id":
+            sender = getattr(message, "sender", None)
+            sender_id = getattr(sender, "platform_id", None) if sender else None
+            return sender_id == value
+        elif key == "sender_name_contains":
+            sender = getattr(message, "sender", None)
+            sender_name = getattr(sender, "name", None) if sender else None
+            return cls.match_contains(sender_name, value)
         elif key == "text_contains":
             return cls.match_contains(getattr(message, "text", None), value)
         elif key == "text_pattern":
@@ -242,11 +252,13 @@ class RuleMatcher:
             return cls.match_contains(metadata.get("subject", ""), value)
         elif key == "group_id_pattern":
             return cls.match_glob(getattr(message, "group_id", None), value)
+        elif key == "group_id":
+            return cls.match_glob(getattr(message, "group_id", None), value)
+        elif key == "thread_id":
+            return getattr(message, "thread_id", None) == value
         elif key == "has_media":
             media = getattr(message, "media", None) or []
             return (len(media) > 0) == value
-        elif key in ("sender_id", "sender_name_contains", "group_id", "thread_id", "from_instance"):
-            return getattr(message, key, None) == value or getattr(getattr(message, "sender", None), key, None) == value
         return True
 
 
@@ -436,6 +448,7 @@ class RoutingEngine:
             actions=message.actions,
             reactions=message.reactions,
             raw=message.raw,
+            to=[destination],
             metadata={**message.metadata, "routed_to": destination},
         )
 
