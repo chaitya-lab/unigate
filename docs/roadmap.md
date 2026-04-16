@@ -35,9 +35,16 @@
 
 ### Storage
 - [x] InMemoryStores
-- [x] SQLiteStores
+- [x] SQLiteStores with retention_days
+- [x] FileStores (file-per-message, multi-instance ready)
 - [ ] RedisStores
 - [ ] Fernet encryption for SecureStore
+
+### Resilience
+- [x] Circuit breaker per instance
+- [x] Exponential backoff retry
+- [x] Dead letter queue
+- [x] Fallback instances
 
 ## Testing Checklist
 

@@ -4,6 +4,11 @@
 unigate:
   mount_prefix: /unigate
   max_concurrent_processing: 50
+  
+  # Plugin directories - load custom channels/extensions from local files
+  # plugin_dirs:
+  #   - ./my_channels
+  #   - ./my_extensions
 
 storage:
   # Storage backends:
@@ -25,13 +30,22 @@ deduplication:
   window_seconds: 300
 
 instances:
-  # Telegram bot example
+  # Telegram bot example with fallback
   my_telegram_bot:
     type: telegram
     token: !env:TELEGRAM_BOT_TOKEN
     mode: polling  # or webhook (requires public URL)
     # webhook_url: https://yourdomain.com/unigate/webhook/telegram
     # webhook_secret: your-secret-token
+    # If this fails, try these fallback instances
+    fallback: [support_bot, sms_backup]
+    retry:
+      max_attempts: 5
+      base_delay_seconds: 2
+      max_delay_seconds: 30
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_timeout: 60
 
   # Another Telegram bot (different instance)
   support_bot:
@@ -54,6 +68,14 @@ instances:
     type: web
     auth_method: bearer
     bearer_token: !env:BEARER_TOKEN
+
+  # SMS fallback (when primary channels fail)
+  # sms_backup:
+  #   type: sms
+  #   provider: twilio
+  #   account_sid: !env:TWILIO_SID
+  #   auth_token: !env:TWILIO_TOKEN
+  #   from_number: !env:TWILIO_FROM
 
 # Extension configuration
 extensions:
