@@ -3,7 +3,6 @@
 from .capabilities import ChannelCapabilities
 from .adapters import FakeWebhookAdapter, InternalAdapter
 from .channel import BaseChannel, KernelHandle, RawRequest, SecureStore, SendResult
-from .channels import APIKeyWebChannel, BearerTokenWebChannel, TelegramChannel, WebChannel
 from .cli import main
 from .config import load_config, load_yaml
 from .extensions import (
@@ -30,7 +29,7 @@ from .message import (
     Reaction,
     Sender,
 )
-from .plugins.base import (
+from .plugins import (
     PluginRegistry,
     PluginType,
     ChannelPlugin,
@@ -39,6 +38,19 @@ from .plugins.base import (
     TransportPlugin,
     get_registry,
     register_plugin_dirs,
+    TelegramChannel,
+    WebChannel,
+    APIKeyWebChannel,
+    BearerTokenWebChannel,
+    WebUIChannel,
+    FromMatcher,
+    TextContainsMatcher,
+    SenderMatcher,
+    HasMediaMatcher,
+    TruncateTransform,
+    ExtractSubjectTransform,
+    AddMetadataTransform,
+    HTTPTransport,
 )
 from .resilience import CircuitBreaker, CircuitState, RetryPolicy
 from .routing import RoutingEngine, RoutingRule, MatchCondition, RoutingAction
@@ -73,8 +85,10 @@ __all__ = [
     "FakeChannel",
     "FakeWebhookAdapter",
     "FormField",
+    "FromMatcher",
     "get_registry",
     "HealthStatus",
+    "HTTPTransport",
     "InMemorySecureStore",
     "InMemoryStores",
     "InboundExtension",
@@ -113,6 +127,7 @@ __all__ = [
     "SecureStore",
     "SendResult",
     "Sender",
+    "SenderMatcher",
     "SetupResult",
     "SetupStatus",
     "SQLiteStores",
@@ -123,6 +138,7 @@ __all__ = [
     "Unigate",
     "UnigateASGIApp",
     "WebChannel",
+    "WebUIChannel",
     "main",
 ]
 

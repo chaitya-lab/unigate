@@ -4,11 +4,11 @@
 
 Unigate uses a **flat plugin structure** with naming conventions. Each plugin file can contain one or more plugins of any type. The system auto-discovers plugins from configured directories.
 
+All plugins operate on the **universal Message format**.
+
 ---
 
 ## Plugin Types
-
-All plugins operate on the **universal Message format**. Channels convert raw external data → Message. Matchers, transforms, and transports work with Message.
 
 | Type | Interface | Description |
 |------|----------|-------------|
@@ -21,6 +21,34 @@ All plugins operate on the **universal Message format**. Channels convert raw ex
 
 ## File Structure
 
+```
+src/unigate/
+├── __init__.py
+├── message.py           # Universal message format
+├── channel.py           # BaseChannel protocol
+├── kernel.py            # Core exchange kernel
+├── routing/             # Routing engine (uses plugins)
+│   ├── engine.py
+│   ├── matcher.py
+│   └── rule.py
+├── plugins/             # All plugin files (flat structure)
+│   ├── __init__.py
+│   ├── base.py              # PluginRegistry, base classes
+│   ├── channel_*.py         # Channel plugins (web, telegram, etc.)
+│   ├── match_*.py          # Matcher plugins (from, text, sender, etc.)
+│   ├── transform_*.py       # Transform plugins (truncate, extract, etc.)
+│   └── transport_*.py       # Transport plugins (http, ftp, etc.)
+└── ...
+```
+
+**User plugins directory:**
+```
+my_app/
+├── plugins/             # Flat structure, naming convention
+│   ├── channel_whatsapp.py
+│   ├── match_myrule.py
+│   └── transform_special.py
+└── unigate.yaml
 ```
 src/unigate/
 ├── __init__.py

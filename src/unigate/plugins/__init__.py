@@ -14,17 +14,21 @@ from .base import (
     get_registry,
     register_plugin_dirs,
 )
+
 from .channel_web import WebChannelPlugin
 from .channel_telegram import TelegramChannelPlugin
-from .match_from import FromMatcher
-from .match_text import TextContainsMatcher, TextPatternMatcher
-from .match_sender import SenderMatcher, SenderPatternMatcher
-from .match_media import HasMediaMatcher, HasAttachmentMatcher
-from .match_time import DayOfWeekMatcher, HourOfDayMatcher
-from .transform_truncate import TruncateTransform
-from .transform_extract import ExtractSubjectTransform
-from .transform_add import AddMetadataTransform, AddTimestampTransform
-from .transport_http import HTTPTransport
+from .channel_web_full import WebChannel, APIKeyWebChannel, BearerTokenWebChannel
+from .channel_webui import WebUIChannel
+from .channel_telegram_full import TelegramChannel
+from .match_from import FromMatcher, FromPatternMatcher
+from .match_text import TextContainsMatcher, TextPatternMatcher, TextStartsWithMatcher, IsCommandMatcher, SubjectContainsMatcher
+from .match_sender import SenderMatcher, SenderPatternMatcher, SenderNameMatcher, SenderDomainMatcher
+from .match_media import HasMediaMatcher, HasAttachmentMatcher, HasImageMatcher, HasVideoMatcher, MediaTypeMatcher
+from .match_time import DayOfWeekMatcher, HourOfDayMatcher, TimeRangeMatcher
+from .transform_truncate import TruncateTransform, Truncate160Transform
+from .transform_extract import ExtractSubjectTransform, EmailSubjectOnlyTransform, ExtractPatternTransform
+from .transform_add import AddMetadataTransform, AddTimestampTransform, AddPrefixTransform, AddSenderTransform, AddTagTransform
+from .transport_http import HTTPTransport, WebhookTransport
 
 __all__ = [
     "PluginRegistry",
@@ -37,20 +41,42 @@ __all__ = [
     "register_plugin_dirs",
     "WebChannelPlugin",
     "TelegramChannelPlugin",
+    "TelegramChannel",
+    "WebChannel",
+    "APIKeyWebChannel",
+    "BearerTokenWebChannel",
+    "WebUIChannel",
     "FromMatcher",
+    "FromPatternMatcher",
     "TextContainsMatcher",
     "TextPatternMatcher",
+    "TextStartsWithMatcher",
+    "IsCommandMatcher",
+    "SubjectContainsMatcher",
     "SenderMatcher",
     "SenderPatternMatcher",
+    "SenderNameMatcher",
+    "SenderDomainMatcher",
     "HasMediaMatcher",
     "HasAttachmentMatcher",
+    "HasImageMatcher",
+    "HasVideoMatcher",
+    "MediaTypeMatcher",
     "DayOfWeekMatcher",
     "HourOfDayMatcher",
+    "TimeRangeMatcher",
     "TruncateTransform",
+    "Truncate160Transform",
     "ExtractSubjectTransform",
+    "EmailSubjectOnlyTransform",
+    "ExtractPatternTransform",
     "AddMetadataTransform",
     "AddTimestampTransform",
+    "AddPrefixTransform",
+    "AddSenderTransform",
+    "AddTagTransform",
     "HTTPTransport",
+    "WebhookTransport",
 ]
 
 __version__ = "0.1.0"
