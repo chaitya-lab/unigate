@@ -6,7 +6,21 @@ import unittest
 from uuid import uuid4
 from datetime import UTC, datetime
 
-from unigate import Exchange, InternalAdapter, Message, NamespacedSecureStore, SQLiteStores, Sender
+from unigate import (
+    Action,
+    Exchange,
+    FormField,
+    Interactive,
+    InteractiveResponse,
+    InternalAdapter,
+    MediaRef,
+    MediaType,
+    Message,
+    NamespacedSecureStore,
+    Reaction,
+    SQLiteStores,
+    Sender,
+)
 from unigate.runtime import UnigateASGIApp
 
 
@@ -77,3 +91,84 @@ class StorageRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(webhook_code, 200)
         self.assertEqual(webhook_payload["status"], "ack")
+
+    async def test_dead_letter_after_max_attempts(self) -> None:
+        secure = NamespacedSecureStore()
+        path = f"{tempfile.gettempdir()}/unigate-test-{uuid4().hex}.db"
+        stores = SQLiteStores(path)
+        exchange = Exchange(stores, stores, stores, stores)
+        adapter = InternalAdapter("inst", secure.for_instance("inst"), exchange)
+        exchange.register_instance("inst", adapter)
+        exchange.set_retry_policy("inst", max_attempts=1, retry_base_seconds=2, retry_max_seconds=30)
+
+        adapter.fail_next_send = True
+        outbound = Message(
+            id="dead-1",
+            session_id="s-dead",
+            from_instance="inst",
+            sender=Sender(platform_id="bot", name="Bot", is_bot=True),
+            ts=datetime.now(UTC),
+            to=["u-dead"],
+            text="must dead letter",
+        )
+        await exchange.enqueue_outbound("inst", outbound)
+        await exchange.flush_outbox()
+        dead_letters = await stores.list_dead_letters()
+        self.assertEqual(len(dead_letters), 1)
+        self.assertEqual(dead_letters[0].outbox_id.startswith("dead-1:u-dead"), True)
+
+    async def test_sqlite_roundtrip_preserves_rich_message_fields(self) -> None:
+        path = f"{tempfile.gettempdir()}/unigate-test-{uuid4().hex}.db"
+        stores = SQLiteStores(path)
+        message = Message(
+            id="rich-1",
+            session_id="rich-s",
+            from_instance="inst",
+            sender=Sender(platform_id="sender", name="Sender", handle="@sender"),
+            ts=datetime.now(UTC),
+            to=["dst"],
+            thread_id="th-1",
+            group_id="gr-1",
+            receiver_id="recv-1",
+            text="hello rich",
+            media=[MediaRef(media_id="m-1", type=MediaType.IMAGE, filename="photo.png")],
+            interactive=Interactive(
+                interaction_id="i-1",
+                type="confirm",
+                prompt="Proceed?",
+                fields=[FormField(name="a", label="A", type="text")],
+                response=InteractiveResponse(interaction_id="i-1", type="confirm", value="yes"),
+            ),
+            actions=[Action(type="typing_on", payload={"seconds": 2})],
+            reactions=[Reaction(emoji=":thumbs_up:", sender_id="sender", ts=datetime.now(UTC))],
+            reply_to_id="prev-1",
+            edit_of_id="edit-1",
+            deleted_id="del-1",
+            stream_id="stream-1",
+            is_final=False,
+            metadata={"k": "v"},
+            raw={"source": "test"},
+        )
+        from unigate.stores import OutboxRecord
+
+        await stores.put_many(
+            [
+                OutboxRecord(
+                    outbox_id="ob-1",
+                    instance_id="inst",
+                    destination="dst",
+                    message=message,
+                    status="pending",
+                    attempts=0,
+                )
+            ]
+        )
+        due = await stores.due(datetime.now(UTC))
+        self.assertEqual(len(due), 1)
+        reloaded = due[0].message
+        self.assertEqual(reloaded.thread_id, "th-1")
+        self.assertEqual(reloaded.media[0].type, MediaType.IMAGE)
+        self.assertIsNotNone(reloaded.interactive)
+        self.assertEqual(reloaded.actions[0].type, "typing_on")
+        self.assertEqual(reloaded.reactions[0].emoji, ":thumbs_up:")
+        self.assertFalse(reloaded.is_final)

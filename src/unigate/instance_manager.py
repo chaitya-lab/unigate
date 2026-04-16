@@ -17,6 +17,9 @@ class InstanceRuntime:
     state: InstanceState = InstanceState.UNCONFIGURED
     last_error: str | None = None
     retries: int = 0
+    max_attempts: int = 5
+    retry_base_seconds: int = 2
+    retry_max_seconds: int = 30
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -24,8 +27,22 @@ class InstanceManager:
     def __init__(self) -> None:
         self.instances: dict[str, InstanceRuntime] = {}
 
-    def register(self, instance_id: str, channel: BaseChannel) -> InstanceRuntime:
-        runtime = InstanceRuntime(instance_id=instance_id, channel=channel)
+    def register(
+        self,
+        instance_id: str,
+        channel: BaseChannel,
+        *,
+        max_attempts: int = 5,
+        retry_base_seconds: int = 2,
+        retry_max_seconds: int = 30,
+    ) -> InstanceRuntime:
+        runtime = InstanceRuntime(
+            instance_id=instance_id,
+            channel=channel,
+            max_attempts=max_attempts,
+            retry_base_seconds=retry_base_seconds,
+            retry_max_seconds=retry_max_seconds,
+        )
         self.instances[instance_id] = runtime
         return runtime
 
@@ -84,6 +101,9 @@ class InstanceManager:
                 "state": runtime.state.value,
                 "last_error": runtime.last_error,
                 "retries": runtime.retries,
+                "max_attempts": runtime.max_attempts,
+                "retry_base_seconds": runtime.retry_base_seconds,
+                "retry_max_seconds": runtime.retry_max_seconds,
                 "updated_at": runtime.updated_at.isoformat(),
             }
             for key, runtime in self.instances.items()

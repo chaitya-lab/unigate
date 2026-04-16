@@ -23,6 +23,7 @@ from .message import (
 )
 from .runtime import UnigateASGIApp
 from .stores import (
+    DeadLetterRecord,
     InboxRecord,
     InMemorySecureStore,
     InMemoryStores,
@@ -40,6 +41,7 @@ __all__ = [
     "EventExtension",
     "ExtensionDecision",
     "Exchange",
+    "DeadLetterRecord",
     "InMemorySecureStore",
     "InMemoryStores",
     "FormField",

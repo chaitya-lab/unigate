@@ -56,6 +56,19 @@ class Exchange:
         self.instance_manager.register(instance_id, channel)
         self.instances[instance_id] = RegisteredInstance(instance_id=instance_id, channel=channel)
 
+    def set_retry_policy(
+        self,
+        instance_id: str,
+        *,
+        max_attempts: int,
+        retry_base_seconds: int = 2,
+        retry_max_seconds: int = 30,
+    ) -> None:
+        runtime = self.instance_manager.instances[instance_id]
+        runtime.max_attempts = max_attempts
+        runtime.retry_base_seconds = retry_base_seconds
+        runtime.retry_max_seconds = retry_max_seconds
+
     def set_handler(self, handler: Handler) -> Handler:
         """Attach the exchange handler."""
 
@@ -193,8 +206,51 @@ class Exchange:
                         )
                     )
                 else:
-                    retry_at = now + timedelta(seconds=min(30, 2 ** (record.attempts + 1)))
-                    await self._outbox.mark_failed(record.outbox_id, result.error or "send failed", retry_at)
+                    await self._schedule_retry_or_dead_letter(
+                        record.instance_id,
+                        record.outbox_id,
+                        record.attempts,
+                        result.error or "send failed",
+                        now,
+                    )
             except Exception as exc:
-                retry_at = now + timedelta(seconds=min(30, 2 ** (record.attempts + 1)))
-                await self._outbox.mark_failed(record.outbox_id, str(exc), retry_at)
+                await self._schedule_retry_or_dead_letter(
+                    record.instance_id,
+                    record.outbox_id,
+                    record.attempts,
+                    str(exc),
+                    now,
+                )
+
+    async def _schedule_retry_or_dead_letter(
+        self,
+        instance_id: str,
+        outbox_id: str,
+        attempts: int,
+        error: str,
+        now: datetime,
+    ) -> None:
+        runtime = self.instance_manager.instances.get(instance_id)
+        if runtime is None:
+            await self._outbox.move_to_dead_letter(outbox_id, error)
+            await self.emit_event(
+                KernelEvent(
+                    name="outbox.dead_letter",
+                    payload={"outbox_id": outbox_id, "instance_id": instance_id, "error": error},
+                )
+            )
+            return
+        if attempts + 1 >= runtime.max_attempts:
+            await self._outbox.move_to_dead_letter(outbox_id, error)
+            runtime.retries += 1
+            await self.emit_event(
+                KernelEvent(
+                    name="outbox.dead_letter",
+                    payload={"outbox_id": outbox_id, "instance_id": instance_id, "error": error},
+                )
+            )
+            return
+        delay_seconds = min(runtime.retry_max_seconds, runtime.retry_base_seconds ** (attempts + 1))
+        retry_at = now + timedelta(seconds=delay_seconds)
+        await self._outbox.mark_failed(outbox_id, error, retry_at)
+        runtime.retries += 1
