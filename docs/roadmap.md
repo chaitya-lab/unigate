@@ -1,35 +1,81 @@
 # Roadmap
 
-## Implemented in 1.5 baseline
+## Implemented (v0.2.0)
 
-- universal `Message` + adapter contract
-- inbox/outbox/session/dedup/secure storage roles
-- in-memory and SQLite durable stores
-- exchange ingest/enqueue/flush pipeline with retry bookkeeping
-- per-destination fan-out and session-origin fallback routing
-- instance lifecycle manager with setup and health transitions
-- extension interfaces (inbound/outbound/event)
-- mountable ASGI runtime surface
-- minimal CLI operations
-- internal and fake webhook adapters for development
+### Core
+- [x] Universal `Message` type (all fields per PRD)
+- [x] BaseChannel adapter contract
+- [x] Exchange: ingest, enqueue, flush pipeline
+- [x] Inbox/Outbox/Session/Dedup stores
+- [x] InMemory and SQLite backends
+- [x] Interactive correlation (pending interactions)
+- [x] Circuit breaker resilience
+- [x] Retry with exponential backoff
+- [x] Dead letter handling
 
-## Next milestones
+### Channels
+- [x] `internal` - In-process messaging
+- [x] `web` - Generic HTTP webhook (HMAC, Bearer, API Key auth)
+- [x] `webui` - Web UI for testing (send/receive via browser)
+- [x] `telegram` - Telegram Bot API (polling mode)
+- [ ] `telegram` webhook mode
+- [ ] WhatsApp
+- [ ] Discord
+- [ ] Slack
+- [ ] Email (SMTP/IMAP)
+- [ ] SMS (Twilio)
 
-### External adapters
+### Runtime
+- [x] ASGI app surface
+- [x] CLI daemon mode (start/stop/status)
+- [x] Webhook router with instance dispatch
+- [x] Plugin discovery (entry points + plugin_dirs)
+- [x] Extension interfaces (inbound/outbound/event)
+- [x] TestKit and FakeChannel
 
-- Telegram
-- WhatsApp
-- Discord
-- Slack
+### Storage
+- [x] InMemoryStores
+- [x] SQLiteStores
+- [ ] RedisStores
+- [ ] Fernet encryption for SecureStore
 
-### Operability hardening
+## Testing Checklist
 
-- richer metrics and tracing events
-- dead-letter support for terminal failures
-- richer retry policies per instance/channel
+- [x] Basic message flow (send/receive)
+- [x] Echo response
+- [x] Dedup (same message ID)
+- [x] Session routing
+- [x] Fan-out (broadcast to multiple instances)
+- [x] Circuit breaker
+- [ ] **Interactive - Confirm buttons**
+- [ ] **Interactive - Select options**
+- [ ] **Group mentions (ignore unless @mentioned)**
+- [ ] **Thread support**
+- [ ] Media send
+- [ ] Typing indicator
+- [ ] Message edit
+- [ ] Message delete
 
-### Developer experience
+## Deferred (Phase 3+)
 
-- advanced CLI filtering and diagnostics
-- adapter scaffolding templates
-- contract test kit for third-party adapters
+### External Adapters
+- WhatsApp Cloud API
+- Discord (webhook + bot)
+- Slack (OAuth)
+- Email (SMTP/IMAP)
+- SMS (Twilio)
+- WebSocket server channel
+
+### Features
+- Fernet encryption for credentials
+- Redis multi-instance backend
+- MCP interface
+- Advanced CLI diagnostics
+- Adapter scaffolding templates
+- Contract test kit
+
+### Production Hardening
+- Metrics and tracing
+- Health check endpoints per instance
+- Graceful shutdown
+- Configuration hot-reload

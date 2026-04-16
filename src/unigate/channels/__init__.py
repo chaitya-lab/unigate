@@ -1,6 +1,7 @@
 """Built-in channel adapters."""
 
-from .web import APIKeyWebChannel, BearerTokenWebChannel, WebChannel
 from .telegram import TelegramChannel
+from .web import APIKeyWebChannel, BearerTokenWebChannel, WebChannel
+from .webui import WebUIChannel
 
-__all__ = ["WebChannel", "BearerTokenWebChannel", "APIKeyWebChannel", "TelegramChannel"]
+__all__ = ["APIKeyWebChannel", "BearerTokenWebChannel", "TelegramChannel", "WebChannel", "WebUIChannel"]
