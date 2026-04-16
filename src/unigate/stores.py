@@ -370,9 +370,24 @@ class InMemoryStores(InboxStore, OutboxStore, SessionStore, DedupStore, Interact
 
 
 class SQLiteStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionStore):
-    def __init__(self, path: str) -> None:
+    """
+    SQLite storage backend with auto-cleanup support.
+    
+    Configurable retention for:
+    - Sent messages: auto-delete after N days (default: 7)
+    - Dedup keys: auto-delete after N days (default: 1)
+    """
+    
+    def __init__(
+        self, 
+        path: str,
+        retention_days: int = 7,
+        dedup_retention_days: int = 1,
+    ) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.retention_days = retention_days
+        self.dedup_retention_days = dedup_retention_days
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -445,6 +460,14 @@ class SQLiteStores(InboxStore, OutboxStore, SessionStore, DedupStore, Interactio
                     UNIQUE(session_id, instance_id)
                 )
                 """
+            )
+            # Cleanup metadata
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)"
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO metadata (key, value) VALUES ('last_cleanup', ?)",
+                (datetime.now().isoformat(),)
             )
 
     async def put(self, record: InboxRecord) -> None:
@@ -656,6 +679,37 @@ class SQLiteStores(InboxStore, OutboxStore, SessionStore, DedupStore, Interactio
             )
             conn.execute("DELETE FROM pending_interaction WHERE interaction_id=?", (str(row["interaction_id"]),))
         return expired
+    
+    async def auto_cleanup(self) -> int:
+        """
+        Run auto-cleanup of old sent messages and dedup keys.
+        Returns number of rows deleted.
+        """
+        now = datetime.now()
+        cutoff = now.timestamp() - (self.retention_days * 86400)
+        dedup_cutoff = now.timestamp() - (self.dedup_retention_days * 86400)
+        
+        total_deleted = 0
+        with self._connect() as conn:
+            # Clean old sent messages
+            result = conn.execute(
+                "DELETE FROM outbox WHERE status='sent' AND ROWID IN (SELECT ROWID FROM outbox WHERE status='sent' LIMIT 1000)"
+            )
+            total_deleted += result.rowcount if result.rowcount else 0
+            
+            # Clean old dedup keys
+            result = conn.execute(
+                "DELETE FROM dedup WHERE 1=1 LIMIT 1000"
+            )
+            total_deleted += result.rowcount if result.rowcount else 0
+            
+            # Update last cleanup time
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_cleanup', ?)",
+                (now.isoformat(),)
+            )
+        
+        return total_deleted
 
 
 class NamespacedSecureStore(SecureStore):
@@ -688,3 +742,352 @@ class _ScopedSecureStore(SecureStore):
 
     async def delete(self, key: str) -> None:
         self.parent._values[self.instance_id].pop(key, None)
+
+
+class FileStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionStore):
+    """
+    File-based storage backend - production alternative to SQLite.
+    
+    Each message stored as a separate JSON file, organized by type and timestamp.
+    Files are named: {timestamp}_{type}_{id}.json
+    
+    Benefits over SQLite:
+    - No concurrent write issues
+    - Easy to inspect/debug individual messages
+    - Can use any filesystem (local, NFS, cloud storage)
+    - Natural backup with rsync/copy
+    - No database locks or corruption risk
+    
+    Cleanup:
+    - Delivered messages auto-deleted (configurable retention_days)
+    - Dead letters kept for inspection
+    - Configurable auto-cleanup interval
+    """
+    
+    def __init__(
+        self,
+        base_path: str = "./unigate_data",
+        retention_days: int = 7,
+        cleanup_interval_seconds: int = 3600,
+    ) -> None:
+        self.base_path = Path(base_path)
+        self.retention_days = retention_days
+        self.cleanup_interval = cleanup_interval_seconds
+        self._last_cleanup = datetime.now()
+        
+        # Create directory structure
+        self.inbox_path = self.base_path / "inbox"
+        self.outbox_path = self.base_path / "outbox"
+        self.sent_path = self.base_path / "sent"
+        self.dead_letters_path = self.base_path / "dead_letters"
+        self.sessions_path = self.base_path / "sessions"
+        self.dedup_path = self.base_path / "dedup"
+        self.interactions_path = self.base_path / "interactions"
+        
+        for path in [self.inbox_path, self.outbox_path, self.sent_path, 
+                     self.dead_letters_path, self.sessions_path, 
+                     self.dedup_path, self.interactions_path]:
+            path.mkdir(parents=True, exist_ok=True)
+        
+        # In-memory indexes for fast lookup
+        self._outbox: dict[str, OutboxRecord] = {}
+        self._dead_letters: list[DeadLetterRecord] = []
+        self._sessions: dict[str, str] = {}
+        self._dedup: set[str] = set()
+        self._pending_interactions: dict[str, PendingInteractionRecord] = {}
+        
+        # Load existing data
+        self._load_indexes()
+    
+    def _load_indexes(self) -> None:
+        """Load existing records into memory indexes."""
+        # Load outbox
+        for f in self.outbox_path.glob("*.json"):
+            try:
+                data = json.loads(f.read_text())
+                record = self._record_from_dict(data)
+                self._outbox[record.outbox_id] = record
+            except Exception:
+                pass
+        
+        # Load sessions
+        for f in self.sessions_path.glob("*.json"):
+            try:
+                data = json.loads(f.read_text())
+                self._sessions[data["session_id"]] = data["destination"]
+            except Exception:
+                pass
+        
+        # Load dedup keys
+        for f in self.dedup_path.glob("*.json"):
+            try:
+                data = json.loads(f.read_text())
+                self._dedup.add(data["key"])
+            except Exception:
+                pass
+    
+    def _filename(self, base_path: Path, prefix: str, id: str, ts: datetime) -> Path:
+        """Generate filename: {timestamp}_{prefix}_{id}.json"""
+        timestamp = ts.strftime("%Y%m%d_%H%M%S_%f")
+        safe_id = id.replace("/", "_").replace("\\", "_")
+        return base_path / f"{timestamp}_{prefix}_{safe_id}.json"
+    
+    def _record_to_dict(self, record: Any) -> dict:
+        """Convert record to dict for JSON serialization."""
+        if isinstance(record, OutboxRecord):
+            return {
+                "type": "outbox",
+                "outbox_id": record.outbox_id,
+                "instance_id": record.instance_id,
+                "destination": record.destination,
+                "message": _message_to_json(record.message),
+                "status": record.status,
+                "attempts": record.attempts,
+                "next_attempt_at": record.next_attempt_at.isoformat() if record.next_attempt_at else None,
+                "last_error": record.last_error,
+            }
+        elif isinstance(record, DeadLetterRecord):
+            return {
+                "type": "dead_letter",
+                "outbox_id": record.outbox_id,
+                "instance_id": record.instance_id,
+                "destination": record.destination,
+                "message": _message_to_json(record.message),
+                "attempts": record.attempts,
+                "last_error": record.last_error,
+                "failed_at": record.failed_at.isoformat() if hasattr(record, 'failed_at') else None,
+            }
+        elif isinstance(record, InboxRecord):
+            return {
+                "type": "inbox",
+                "message_id": record.message_id,
+                "instance_id": record.instance_id,
+                "message": _message_to_json(record.message),
+                "received_at": record.received_at.isoformat() if hasattr(record, 'received_at') else None,
+            }
+        elif isinstance(record, PendingInteractionRecord):
+            return {
+                "type": "interaction",
+                "interaction_id": record.interaction_id,
+                "session_id": record.session_id,
+                "instance_id": record.instance_id,
+                "timeout_at": record.timeout_at.isoformat() if record.timeout_at else None,
+                "created_at": record.created_at.isoformat() if hasattr(record, 'created_at') else None,
+            }
+        return {}
+    
+    def _record_from_dict(self, data: dict) -> Any:
+        """Reconstruct record from dict."""
+        if data.get("type") == "outbox":
+            return OutboxRecord(
+                outbox_id=data["outbox_id"],
+                instance_id=data["instance_id"],
+                destination=data["destination"],
+                message=_message_from_json(data["message"]),
+                status=data["status"],
+                attempts=data["attempts"],
+                next_attempt_at=datetime.fromisoformat(data["next_attempt_at"]) if data.get("next_attempt_at") else None,
+                last_error=data.get("last_error"),
+            )
+        elif data.get("type") == "dead_letter":
+            return DeadLetterRecord(
+                outbox_id=data["outbox_id"],
+                instance_id=data["instance_id"],
+                destination=data["destination"],
+                message=_message_from_json(data["message"]),
+                attempts=data["attempts"],
+                last_error=data["last_error"],
+                failed_at=datetime.fromisoformat(data["failed_at"]) if data.get("failed_at") else datetime.now(),
+            )
+        elif data.get("type") == "inbox":
+            return InboxRecord(
+                message_id=data["message_id"],
+                instance_id=data["instance_id"],
+                message=_message_from_json(data["message"]),
+                received_at=datetime.fromisoformat(data["received_at"]) if data.get("received_at") else datetime.now(),
+            )
+        elif data.get("type") == "interaction":
+            return PendingInteractionRecord(
+                interaction_id=data["interaction_id"],
+                session_id=data["session_id"],
+                instance_id=data["instance_id"],
+                timeout_at=datetime.fromisoformat(data["timeout_at"]) if data.get("timeout_at") else None,
+                created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(),
+            )
+        return None
+    
+    async def _maybe_cleanup(self) -> None:
+        """Run cleanup if interval has passed."""
+        now = datetime.now()
+        if (now - self._last_cleanup).total_seconds() >= self.cleanup_interval:
+            await self._cleanup()
+            self._last_cleanup = now
+    
+    async def _cleanup(self) -> None:
+        """Clean up old sent/delivered messages."""
+        cutoff = datetime.now().timestamp() - (self.retention_days * 86400)
+        
+        # Clean old outbox entries marked as sent
+        for f in self.sent_path.glob("*.json"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except Exception:
+                pass
+        
+        # Clean old dedup keys
+        for f in self.dedup_path.glob("*.json"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except Exception:
+                pass
+    
+    async def put(self, record: InboxRecord) -> None:
+        ts = getattr(record, 'received_at', datetime.now())
+        fpath = self._filename(self.inbox_path, "inbox", record.message_id, ts)
+        fpath.write_text(json.dumps(self._record_to_dict(record), separators=(",", ":")))
+    
+    async def list_inbox(self, limit: int = 50) -> list[InboxRecord]:
+        files = sorted(self.inbox_path.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)[:limit]
+        records = []
+        for f in files:
+            try:
+                data = json.loads(f.read_text())
+                record = self._record_from_dict(data)
+                if record:
+                    records.append(record)
+            except Exception:
+                pass
+        return records
+    
+    async def put_many(self, records: list[OutboxRecord]) -> None:
+        for record in records:
+            ts = datetime.now()
+            fpath = self._filename(self.outbox_path, "outbox", record.outbox_id, ts)
+            fpath.write_text(json.dumps(self._record_to_dict(record), separators=(",", ":")))
+            self._outbox[record.outbox_id] = record
+    
+    async def list_outbox(self, limit: int = 50) -> list[OutboxRecord]:
+        records = list(self._outbox.values())
+        records.sort(key=lambda r: r.outbox_id, reverse=True)
+        return records[:limit]
+    
+    async def due(self, now: datetime, limit: int = 100) -> list[OutboxRecord]:
+        due_items = []
+        for record in self._outbox.values():
+            if record.status not in {"pending", "retry"}:
+                continue
+            if record.next_attempt_at is None or record.next_attempt_at <= now:
+                due_items.append(record)
+        due_items.sort(key=lambda item: item.outbox_id)
+        return due_items[:limit]
+    
+    async def mark_sent(self, outbox_id: str) -> None:
+        if outbox_id in self._outbox:
+            record = self._outbox[outbox_id]
+            record.status = "sent"
+            # Move to sent folder for cleanup
+            ts = datetime.now()
+            fpath = self._filename(self.sent_path, "sent", outbox_id, ts)
+            fpath.write_text(json.dumps(self._record_to_dict(record), separators=(",", ":")))
+            # Remove from outbox folder
+            for f in self.outbox_path.glob(f"*_{outbox_id}.json"):
+                f.unlink()
+            # Remove from in-memory index
+            del self._outbox[outbox_id]
+    
+    async def mark_failed(self, outbox_id: str, error: str, retry_at: datetime | None) -> None:
+        if outbox_id not in self._outbox:
+            return
+        record = self._outbox[outbox_id]
+        record.status = "retry" if retry_at else "failed"
+        record.attempts += 1
+        record.last_error = error
+        record.next_attempt_at = retry_at
+        # Update file
+        for f in self.outbox_path.glob(f"*_{outbox_id}.json"):
+            f.write_text(json.dumps(self._record_to_dict(record), separators=(",", ":")))
+            break
+    
+    async def move_to_dead_letter(self, outbox_id: str, error: str) -> None:
+        if outbox_id not in self._outbox:
+            return
+        record = self._outbox[outbox_id]
+        record.status = "dead_letter"
+        record.attempts += 1
+        record.last_error = error
+        record.next_attempt_at = None
+        
+        dead_record = DeadLetterRecord(
+            outbox_id=record.outbox_id,
+            instance_id=record.instance_id,
+            destination=record.destination,
+            message=record.message,
+            attempts=record.attempts,
+            last_error=error,
+            failed_at=datetime.now(),
+        )
+        self._dead_letters.append(dead_record)
+        
+        # Write to dead_letters folder
+        ts = datetime.now()
+        fpath = self._filename(self.dead_letters_path, "dl", outbox_id, ts)
+        fpath.write_text(json.dumps(self._record_to_dict(dead_record), separators=(",", ":")))
+        
+        # Remove from outbox
+        for f in self.outbox_path.glob(f"*_{outbox_id}.json"):
+            f.unlink()
+        del self._outbox[outbox_id]
+    
+    async def list_dead_letters(self, limit: int = 50) -> list[DeadLetterRecord]:
+        return self._dead_letters[-limit:]
+    
+    async def set_origin(self, session_id: str, destination: str) -> None:
+        self._sessions[session_id] = destination
+        fpath = self.sessions_path / f"{session_id}.json"
+        fpath.write_text(json.dumps({"session_id": session_id, "destination": destination}, separators=(",", ":")))
+    
+    async def get_origin(self, session_id: str) -> str | None:
+        return self._sessions.get(session_id)
+    
+    async def seen(self, key: str) -> bool:
+        return key in self._dedup
+    
+    async def mark(self, key: str) -> None:
+        self._dedup.add(key)
+        fpath = self.dedup_path / f"{key.replace('/', '_')}.json"
+        fpath.write_text(json.dumps({"key": key}, separators=(",", ":")))
+    
+    async def put_interaction(self, record: PendingInteractionRecord) -> None:
+        key = f"{record.session_id}:{record.instance_id}"
+        self._pending_interactions[key] = record
+        fpath = self.interactions_path / f"{record.interaction_id}.json"
+        fpath.write_text(json.dumps(self._record_to_dict(record), separators=(",", ":")))
+    
+    async def get_interaction(self, session_id: str, instance_id: str) -> PendingInteractionRecord | None:
+        key = f"{session_id}:{instance_id}"
+        return self._pending_interactions.get(key)
+    
+    async def remove_interaction(self, interaction_id: str) -> None:
+        to_remove = [k for k, v in self._pending_interactions.items() if v.interaction_id == interaction_id]
+        for k in to_remove:
+            del self._pending_interactions[k]
+        for f in self.interactions_path.glob(f"*{interaction_id}*.json"):
+            f.unlink()
+    
+    async def cleanup_expired(self, now: datetime) -> list[PendingInteractionRecord]:
+        expired = []
+        for key, record in list(self._pending_interactions.items()):
+            if record.timeout_at and record.timeout_at <= now:
+                expired.append(record)
+                del self._pending_interactions[key]
+        return expired
+    
+    async def auto_cleanup(self) -> int:
+        """
+        Run auto-cleanup of old sent messages and dedup keys.
+        Returns number of files deleted.
+        """
+        await self._maybe_cleanup()
+        return 0

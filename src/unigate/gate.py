@@ -11,7 +11,7 @@ from .events import KernelEvent
 from .kernel import Exchange, Handler
 from .message import Message
 from .runtime import UnigateASGIApp
-from .stores import InMemoryStores, NamespacedSecureStore, SQLiteStores
+from .stores import FileStores, InMemoryStores, NamespacedSecureStore, SQLiteStores
 
 
 T = TypeVar("T")
@@ -47,13 +47,29 @@ class Unigate:
         cfg = config_module.load_config(config)
         storage_config = cfg.get("storage", {})
         backend = storage_config.get("backend", "memory")
-        storage_path = storage_config.get("path", "./unigate.db")
+        storage_path = storage_config.get("path", "./unigate_data")
+        
         if backend == "memory":
             stores = InMemoryStores()
         elif backend == "sqlite":
-            stores = SQLiteStores(storage_path)
+            retention_days = storage_config.get("retention_days", 7)
+            dedup_retention_days = storage_config.get("dedup_retention_days", 1)
+            stores = SQLiteStores(
+                storage_path, 
+                retention_days=retention_days,
+                dedup_retention_days=dedup_retention_days,
+            )
+        elif backend == "file":
+            retention_days = storage_config.get("retention_days", 7)
+            cleanup_interval = storage_config.get("cleanup_interval_seconds", 3600)
+            stores = FileStores(
+                base_path=storage_path,
+                retention_days=retention_days,
+                cleanup_interval_seconds=cleanup_interval,
+            )
         else:
             stores = InMemoryStores()
+        
         exchange = Exchange(
             inbox=stores,
             outbox=stores,

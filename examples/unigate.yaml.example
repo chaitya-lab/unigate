@@ -6,8 +6,20 @@ unigate:
   max_concurrent_processing: 50
 
 storage:
+  # Storage backends:
+  # - memory: In-memory only (no persistence, good for dev/testing)
+  # - sqlite: SQLite database (good for single instance)
+  # - file: File-per-message (good for multi-instance, NFS, cloud storage)
   backend: sqlite
-  path: ./unigate.db
+  path: ./unigate_data
+  
+  # Retention settings (for sqlite and file backends):
+  # After this many days, sent messages are auto-deleted
+  retention_days: 7
+  # Dedup keys are kept for this many days
+  dedup_retention_days: 1
+  # How often to run cleanup (seconds)
+  cleanup_interval_seconds: 3600
 
 deduplication:
   window_seconds: 300
