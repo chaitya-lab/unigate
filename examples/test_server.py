@@ -181,7 +181,11 @@ HTML_PAGE = """<!DOCTYPE html>
         </div>
     </div>
     <script>
-        const sessionId = localStorage.getItem('unigate_session') || (localStorage.setItem('unigate_session', Math.random().toString(36).substr(2, 9)));
+        let sessionId = localStorage.getItem('unigate_session');
+        if (!sessionId) {
+            sessionId = Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('unigate_session', sessionId);
+        }
         let lastPoll = 0;
         
         async function sendMessage() {
@@ -190,31 +194,41 @@ HTML_PAGE = """<!DOCTYPE html>
             if (!text) return;
             input.value = '';
             
-            await fetch('/send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text, session_id: sessionId })
-            });
-            poll();
+            try {
+                const res = await fetch('/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text, session_id: sessionId })
+                });
+                const data = await res.json();
+                document.getElementById('status').textContent = 'Sent!';
+                setTimeout(() => poll(), 100);
+            } catch(e) {
+                document.getElementById('status').textContent = 'Error: ' + e.message;
+            }
         }
         
         async function sendInteractive() {
-            await fetch('/send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    text: 'Please choose:',
-                    session_id: sessionId,
-                    interactive: {
-                        type: 'confirm',
-                        interaction_id: 'test-' + Date.now(),
-                        prompt: 'Do you want to proceed?',
-                        options: ['yes', 'no'],
-                        timeout_seconds: 60
-                    }
-                })
-            });
-            poll();
+            try {
+                const res = await fetch('/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        text: 'Please choose:',
+                        session_id: sessionId,
+                        interactive: {
+                            type: 'confirm',
+                            interaction_id: 'test-' + Date.now(),
+                            prompt: 'Do you want to proceed?',
+                            options: ['yes', 'no'],
+                            timeout_seconds: 60
+                        }
+                    })
+                });
+                setTimeout(() => poll(), 100);
+            } catch(e) {
+                document.getElementById('status').textContent = 'Error: ' + e.message;
+            }
         }
         
         async function poll() {
@@ -227,9 +241,9 @@ HTML_PAGE = """<!DOCTYPE html>
                     addMessage(msg);
                 });
                 
-                document.getElementById('status').textContent = 'Connected | Messages: ' + data.messages.length;
+                document.getElementById('status').textContent = 'Connected (' + data.messages.length + ' messages)';
             } catch (e) {
-                document.getElementById('status').textContent = 'Error: ' + e.message;
+                document.getElementById('status').textContent = 'Poll error: ' + e.message;
             }
         }
         
