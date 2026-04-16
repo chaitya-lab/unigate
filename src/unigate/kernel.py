@@ -340,3 +340,50 @@ class Exchange:
         retry_at = now + timedelta(seconds=delay_seconds)
         await self._outbox.mark_failed(outbox_id, error, retry_at)
         runtime.retries += 1
+
+    async def check_health(self) -> dict[str, str]:
+        """
+        Check health of all registered instances.
+        Returns dict mapping instance_id to health status.
+        """
+        from .lifecycle import HealthStatus
+        results = {}
+        for instance_id in self.instances:
+            try:
+                health = await self.instance_manager.health(instance_id)
+                results[instance_id] = health.value
+            except Exception:
+                results[instance_id] = "unhealthy"
+        return results
+
+    async def health_check_loop(self, interval_seconds: float = 60.0) -> None:
+        """
+        Background task that periodically checks instance health.
+        Updates instance state based on health status.
+        """
+        while True:
+            await asyncio.sleep(interval_seconds)
+            try:
+                for instance_id in list(self.instances.keys()):
+                    try:
+                        health = await self.instance_manager.health(instance_id)
+                        if health == HealthStatus.HEALTHY:
+                            await self.emit_event(
+                                KernelEvent(
+                                    name="health.ok",
+                                    payload={"instance_id": instance_id},
+                                )
+                            )
+                        else:
+                            await self.emit_event(
+                                KernelEvent(
+                                    name="health.degraded",
+                                    payload={"instance_id": instance_id, "status": health.value},
+                                )
+                            )
+                    except Exception:
+                        pass
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
