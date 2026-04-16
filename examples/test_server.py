@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from unigate import Exchange, Message, NamespacedSecureStore, TelegramChannel
 from unigate.channels import WebUIChannel
+from unigate.message import Interactive
 from unigate.stores import InMemoryStores
 
 
@@ -66,13 +67,13 @@ class UnifiedHandler:
                 sender=msg.sender,
                 ts=datetime.now(timezone.utc),
                 text="Do you want to proceed?",
-                interactive={
-                    "type": "confirm",
-                    "interaction_id": f"confirm-{datetime.now(timezone.utc).timestamp()}",
-                    "prompt": "Do you want to proceed?",
-                    "options": ["yes", "no"],
-                    "timeout_seconds": 60,
-                },
+                interactive=Interactive(
+                    interaction_id=f"confirm-{datetime.now(timezone.utc).timestamp()}",
+                    type="confirm",
+                    prompt="Do you want to proceed?",
+                    options=["yes", "no"],
+                    timeout_seconds=60,
+                ),
             )
         
         if msg.text == "/select":
@@ -83,13 +84,13 @@ class UnifiedHandler:
                 sender=msg.sender,
                 ts=datetime.now(timezone.utc),
                 text="Choose an option:",
-                interactive={
-                    "type": "select",
-                    "interaction_id": f"select-{datetime.now(timezone.utc).timestamp()}",
-                    "prompt": "What would you like to do?",
-                    "options": ["Option A", "Option B", "Option C", "Cancel"],
-                    "timeout_seconds": 60,
-                },
+                interactive=Interactive(
+                    interaction_id=f"select-{datetime.now(timezone.utc).timestamp()}",
+                    type="select",
+                    prompt="What would you like to do?",
+                    options=["Option A", "Option B", "Option C", "Cancel"],
+                    timeout_seconds=60,
+                ),
             )
         
         if msg.text == "/help":
@@ -259,7 +260,7 @@ HTML_PAGE = """<!DOCTYPE html>
             if (msg.interactive && msg.interactive.options) {
                 html += '<div class="interactive">';
                 msg.interactive.options.forEach(opt => {
-                    html += '<button onclick="respond(\'' + msg.id + '\',\'' + opt + '\')">' + opt + '</button>';
+                    html += '<button class="opt-btn" data-msg-id="' + msg.id + '" data-value="' + opt + '">' + opt + '</button>';
                 });
                 html += '</div>';
             }
@@ -285,6 +286,15 @@ HTML_PAGE = """<!DOCTYPE html>
         document.getElementById('status').textContent = 'Connected';
         setInterval(poll, 1000);
         poll();
+        
+        // Event delegation for interactive buttons
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('opt-btn')) {
+                const msgId = e.target.getAttribute('data-msg-id');
+                const value = e.target.getAttribute('data-value');
+                respond(msgId, value);
+            }
+        });
     </script>
 </body>
 </html>
@@ -379,9 +389,15 @@ async def main() -> None:
             if data.get("interactive_response"):
                 msg_data["interactive_response"] = data["interactive_response"]
             
-            await exchange.ingest("web", msg_data)
-            await asyncio.sleep(0.1)
-            await exchange.flush_outbox()
+            try:
+                await exchange.ingest("web", msg_data)
+                await asyncio.sleep(0.1)
+                await exchange.flush_outbox()
+            except Exception as e:
+                import traceback
+                print(f"\n[ERROR in handle_send]: {e}")
+                traceback.print_exc()
+                return web.json_response({"error": str(e)}, status=500)
             
             return web.json_response({"ok": True})
         

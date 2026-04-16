@@ -47,10 +47,10 @@
 - [x] Session routing
 - [x] Fan-out (broadcast to multiple instances)
 - [x] Circuit breaker
-- [ ] **Interactive - Confirm buttons**
-- [ ] **Interactive - Select options**
-- [ ] **Group mentions (ignore unless @mentioned)**
-- [ ] **Thread support**
+- [x] **Interactive - Confirm buttons**
+- [x] **Interactive - Select options**
+- [x] **Group mentions (ignore unless @mentioned)**
+- [x] **Thread support**
 - [ ] Media send
 - [ ] Typing indicator
 - [ ] Message edit
