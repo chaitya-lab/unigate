@@ -6,7 +6,6 @@ import asyncio
 import json
 from typing import Any, ClassVar
 from urllib.request import Request, urlopen
-from uuid import uuid4
 
 from ..capabilities import ChannelCapabilities
 from ..channel import BaseChannel, RawRequest, SendResult
@@ -17,7 +16,12 @@ from ..stores import SecureStore
 
 
 class TelegramChannel:
-    """Telegram Bot API channel adapter."""
+    """Telegram Bot API channel adapter.
+    
+    Supports two modes:
+    - polling: Long polling with getUpdates (default, good for development)
+    - webhook: Telegram pushes updates to your URL (better for production)
+    """
 
     name: ClassVar[str] = "telegram"
     transport: ClassVar[str] = "http"
@@ -57,14 +61,27 @@ class TelegramChannel:
 
     async def start(self) -> None:
         self._started = True
-        if self.config.get("mode", "polling") == "polling":
+        mode = self.config.get("mode", "polling")
+        if mode == "polling":
             self._poll_task = asyncio.create_task(self._poll_loop())
+        elif mode == "webhook":
+            await self._setup_webhook()
 
     async def stop(self) -> None:
         self._started = False
         if self._poll_task:
             self._poll_task.cancel()
             self._poll_task = None
+
+    async def _setup_webhook(self) -> None:
+        webhook_url = self.config.get("webhook_url")
+        if not webhook_url:
+            return
+        secret = self.config.get("webhook_secret")
+        await self._api_call("setWebhook", {
+            "url": webhook_url,
+            "secret_token": secret,
+        })
 
     async def _poll_loop(self) -> None:
         while self._started:
@@ -75,19 +92,20 @@ class TelegramChannel:
                 if updates:
                     last_update_id = max(u.get("update_id", 0) for u in updates)
                     self._offset = last_update_id + 1
+            except asyncio.CancelledError:
+                break
             except Exception:
                 await asyncio.sleep(5)
                 continue
-            await asyncio.sleep(1)
 
     async def _get_updates(self) -> list[dict[str, Any]]:
         if not self._token:
             return []
         url = f"{self.BASE_URL}/bot{self._token}/getUpdates"
-        params = f"?offset={self._offset}&timeout=30&allowed_updates=message,edited_message,callback_query"
+        params = f"?offset={self._offset}&timeout=55&allowed_updates=message,edited_message,callback_query"
         try:
             req = Request(url + params)
-            with urlopen(req, timeout=35) as response:
+            with urlopen(req, timeout=60) as response:
                 data = json.loads(response.read().decode())
                 if data.get("ok"):
                     return data.get("result", [])
@@ -109,10 +127,10 @@ class TelegramChannel:
         chat = msg.get("chat", {})
         user = msg.get("from", {})
         return {
-            "id": str(msg.get("message_id", uuid4())),
+            "id": str(msg.get("message_id", "")),
             "session_id": str(chat.get("id", "unknown")),
             "from_instance": self.instance_id,
-            "platform_id": str(msg.get("message_id")),
+            "platform_id": str(msg.get("message_id", "")),
             "sender": {
                 "id": str(user.get("id", "unknown")),
                 "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or "Unknown",
@@ -139,15 +157,12 @@ class TelegramChannel:
             is_bot=sender_data.get("is_bot", False),
             raw=sender_data,
         )
-        ts = raw.get("ts")
-        if ts is None:
-            ts = datetime.now(timezone.utc)
         return Message(
-            id=raw.get("id", str(uuid4())),
-            session_id=raw.get("session_id", str(uuid4())),
+            id=raw.get("id", str(raw.get("platform_id", ""))),
+            session_id=raw.get("session_id", "unknown"),
             from_instance=self.instance_id,
             sender=sender,
-            ts=ts,
+            ts=datetime.now(timezone.utc),
             platform_id=raw.get("platform_id"),
             to=[],
             thread_id=raw.get("thread_id"),
@@ -155,7 +170,7 @@ class TelegramChannel:
             receiver_id=raw.get("receiver_id"),
             bot_mentioned=raw.get("bot_mentioned", True),
             text=raw.get("text", ""),
-            raw=raw.get("raw", raw),
+            raw=raw.get("raw", {}),
             metadata=raw.get("metadata", {}),
         )
 
@@ -190,12 +205,15 @@ class TelegramChannel:
     async def _send_action(self, payload: dict[str, Any]) -> None:
         await self._api_call("sendChatAction", payload)
 
-    async def _api_call(self, method: str, data: dict[str, Any]) -> dict[str, Any]:
+    async def _api_call(self, method: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self._token:
             return {"ok": False, "error": "no token"}
         url = f"{self.BASE_URL}/bot{self._token}/{method}"
-        req = Request(url, data=json.dumps(data).encode(), headers={"Content-Type": "application/json"})
         try:
+            if data is not None:
+                req = Request(url, data=json.dumps(data).encode(), headers={"Content-Type": "application/json"})
+            else:
+                req = Request(url)
             with urlopen(req, timeout=30) as response:
                 return json.loads(response.read().decode())
         except Exception as exc:
@@ -205,10 +223,9 @@ class TelegramChannel:
         secret = self.config.get("webhook_secret")
         if not secret:
             return True
-        token = request.query.get("secret", "")
-        import hashlib
-        expected = hashlib.sha256(secret.encode()).hexdigest()
-        return token == expected
+        header_name = "x-telegram-bot-api-secret-token"
+        token = request.headers.get(header_name, "")
+        return token == secret
 
     @property
     def capabilities(self) -> ChannelCapabilities:
@@ -232,7 +249,7 @@ class TelegramChannel:
     async def health_check(self) -> HealthStatus:
         if not self._token:
             return HealthStatus.UNKNOWN
-        result = await self._api_call("getMe", {})
+        result = await self._api_call("getMe")
         return HealthStatus.HEALTHY if result.get("ok") else HealthStatus.UNHEALTHY
 
     async def background_tasks(self) -> list[object]:

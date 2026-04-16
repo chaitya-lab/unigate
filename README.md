@@ -61,7 +61,9 @@ gate.serve()
 
 ```powershell
 unigate serve                    # Start kernel (use with ASGI server)
-unigate status                  # Kernel health and stats
+unigate start                   # Start daemon in background
+unigate stop                    # Stop daemon
+unigate status                  # Show status
 unigate instances list           # List all instances
 unigate instances status <name> # Instance details
 unigate inbox list              # List inbox records
@@ -72,11 +74,62 @@ unigate outbox dead-letters     # View dead letters
 
 ## Channels
 
-Built-in adapters:
+### Telegram
 
-- `internal` - In-process messaging
-- `web` - Generic HTTP webhook with HMAC/Bearer/API Key auth
-- `telegram` - Telegram Bot API
+Two modes:
+
+1. **polling** (default, good for development):
+   - Long polling with 55-second timeout
+   - No external URL needed
+   - Efficient - only requests when updates available
+
+2. **webhook** (better for production):
+   - Telegram pushes updates to your URL
+   - Requires public HTTPS endpoint
+   - Lower latency, higher efficiency
+
+```yaml
+instances:
+  my_bot:
+    type: telegram
+    token: !env:TELEGRAM_BOT_TOKEN
+    mode: polling  # or webhook
+
+  # Multiple Telegram bots:
+  support_bot:
+    type: telegram
+    token: !env:SUPPORT_BOT_TOKEN
+    mode: polling
+
+  sales_bot:
+    type: telegram  
+    token: !env:SALES_BOT_TOKEN
+    mode: webhook
+    webhook_url: https://yourdomain.com/unigate/webhook/sales_bot
+    webhook_secret: your-secret
+```
+
+### Web
+
+Generic HTTP webhook with multiple auth methods:
+
+```yaml
+instances:
+  api_channel:
+    type: web
+    auth_method: api_key
+    api_key: !env:API_KEY
+```
+
+### Internal
+
+In-process messaging for testing or internal use:
+
+```yaml
+instances:
+  internal:
+    type: internal
+```
 
 ## Configuration (unigate.yaml)
 
@@ -86,15 +139,48 @@ unigate:
   max_concurrent_processing: 50
 
 storage:
-  backend: sqlite
+  backend: sqlite  # or: memory, redis
   path: ./unigate.db
 
+deduplication:
+  window_seconds: 300
+
 instances:
-  my_bot:
+  my_telegram:
     type: telegram
     token: !env:TELEGRAM_BOT_TOKEN
     mode: polling
+    retry:
+      max_attempts: 5
+      base_delay_seconds: 2
+      max_delay_seconds: 30
+    circuit_breaker:
+      failure_threshold: 5
+      recovery_timeout: 60
 ```
+
+## Multiple Instances
+
+Each instance has its own:
+- Auth credentials (stored securely per-instance)
+- Retry policy
+- Circuit breaker
+- Outbox queue
+
+Example - Telegram with different bots:
+
+```yaml
+instances:
+  bot_alpha:
+    type: telegram
+    token: !env:BOT_ALPHA_TOKEN
+  
+  bot_beta:
+    type: telegram
+    token: !env:BOT_BETA_TOKEN
+```
+
+Messages to bot_alpha stay isolated from bot_beta.
 
 ## Development
 
