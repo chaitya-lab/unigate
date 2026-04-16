@@ -4,14 +4,30 @@ from __future__ import annotations
 
 import fnmatch
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..message import Message
 
 
 class RuleMatcher:
-    """Matches messages against rule conditions."""
+    """Matches messages against rule conditions using plugin matchers."""
+    
+    _matcher_registry: Any = None
+    
+    @classmethod
+    def _get_registry(cls):
+        """Get matcher registry (lazy load)."""
+        if cls._matcher_registry is None:
+            from .matchers import get_matcher_registry
+            cls._matcher_registry = get_matcher_registry()
+        return cls._matcher_registry
+    
+    @classmethod
+    def get_matcher(cls, name: str):
+        """Get a matcher instance by name."""
+        registry = cls._get_registry()
+        return registry.create(name)
     
     @staticmethod
     def match_channel(message: "Message", pattern: str | None) -> bool:
@@ -57,6 +73,9 @@ class RuleMatcher:
         """
         Check if a message matches all conditions in the given condition object.
         
+        Uses matcher registry for extensible matching.
+        Falls back to hardcoded matching for backward compatibility.
+        
         Returns True if ALL conditions match (AND logic).
         Returns True if condition is None (matches everything).
         """
@@ -68,81 +87,46 @@ class RuleMatcher:
         if not hasattr(condition, "from_channel"):
             condition = MatchCondition.from_dict(condition) if condition else MatchCondition()
         
-        # Empty condition matches everything
         if condition.matches_everything():
             return True
         
-        # from_channel
-        if condition.from_channel:
-            if not cls.match_channel(message, condition.from_channel):
-                return False
+        conditions = condition.to_dict()
         
-        # from_instance
-        if condition.from_instance:
-            if getattr(message, "from_instance", None) != condition.from_instance:
-                return False
+        for key, value in conditions.items():
+            if value is None:
+                continue
+            
+            matcher = cls.get_matcher(key)
+            if matcher:
+                if not matcher.match(message, value):
+                    return False
+            else:
+                if not cls._match_fallback(key, message, value):
+                    return False
         
-        # sender_id
-        if condition.sender_id:
+        return True
+    
+    @classmethod
+    def _match_fallback(cls, key: str, message: "Message", value: Any) -> bool:
+        """Fallback matching for keys without plugins."""
+        if key == "from_channel":
+            return cls.match_channel(message, value)
+        elif key == "sender_pattern":
             sender = getattr(message, "sender", None)
             sender_id = getattr(sender, "platform_id", None) if sender else None
-            if sender_id != condition.sender_id:
-                return False
-        
-        # sender_pattern (glob)
-        if condition.sender_pattern:
-            sender = getattr(message, "sender", None)
-            sender_id = getattr(sender, "platform_id", None) if sender else None
-            if not cls.match_glob(sender_id, condition.sender_pattern):
-                return False
-        
-        # sender_name_contains
-        if condition.sender_name_contains:
-            sender = getattr(message, "sender", None)
-            sender_name = getattr(sender, "name", None) if sender else None
-            if not cls.match_contains(sender_name, condition.sender_name_contains):
-                return False
-        
-        # text_contains
-        if condition.text_contains:
-            text = getattr(message, "text", None)
-            if not cls.match_contains(text, condition.text_contains):
-                return False
-        
-        # text_pattern (regex)
-        if condition.text_pattern:
-            text = getattr(message, "text", None)
-            if not cls.match_regex(text, condition.text_pattern):
-                return False
-        
-        # subject_contains (email)
-        if condition.subject_contains:
+            return cls.match_glob(sender_id, value)
+        elif key == "text_contains":
+            return cls.match_contains(getattr(message, "text", None), value)
+        elif key == "text_pattern":
+            return cls.match_regex(getattr(message, "text", None), value)
+        elif key == "subject_contains":
             metadata = getattr(message, "metadata", {}) or {}
-            subject = metadata.get("subject", "")
-            if not cls.match_contains(subject, condition.subject_contains):
-                return False
-        
-        # group_id
-        if condition.group_id:
-            if getattr(message, "group_id", None) != condition.group_id:
-                return False
-        
-        # group_id_pattern (glob)
-        if condition.group_id_pattern:
-            group_id = getattr(message, "group_id", None)
-            if not cls.match_glob(group_id, condition.group_id_pattern):
-                return False
-        
-        # thread_id
-        if condition.thread_id:
-            if getattr(message, "thread_id", None) != condition.thread_id:
-                return False
-        
-        # has_media
-        if condition.has_media is not None:
+            return cls.match_contains(metadata.get("subject", ""), value)
+        elif key == "group_id_pattern":
+            return cls.match_glob(getattr(message, "group_id", None), value)
+        elif key == "has_media":
             media = getattr(message, "media", None) or []
-            has_media = len(media) > 0
-            if has_media != condition.has_media:
-                return False
-        
+            return (len(media) > 0) == value
+        elif key in ("sender_id", "sender_name_contains", "group_id", "thread_id", "from_instance"):
+            return getattr(message, key, None) == value or getattr(getattr(message, "sender", None), key, None) == value
         return True

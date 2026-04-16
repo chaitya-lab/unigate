@@ -22,6 +22,12 @@ class MatchCondition:
     group_id: str | None = None
     thread_id: str | None = None
     has_media: bool | None = None
+    has_attachment: bool | None = None
+    has_image: bool | None = None
+    has_video: bool | None = None
+    media_type: str | None = None
+    day_of_week: str | list[str] | None = None
+    hour_of_day: int | list[int] | str | None = None
     
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> MatchCondition | None:
@@ -40,18 +46,42 @@ class MatchCondition:
             group_id=data.get("group_id"),
             thread_id=data.get("thread_id"),
             has_media=data.get("has_media"),
+            has_attachment=data.get("has_attachment"),
+            has_image=data.get("has_image"),
+            has_video=data.get("has_video"),
+            media_type=data.get("media_type"),
+            day_of_week=data.get("day_of_week"),
+            hour_of_day=data.get("hour_of_day"),
         )
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict for matcher iteration."""
+        return {
+            "from_channel": self.from_channel,
+            "from_instance": self.from_instance,
+            "sender_pattern": self.sender_pattern,
+            "sender_id": self.sender_id,
+            "sender_name_contains": self.sender_name_contains,
+            "text_contains": self.text_contains,
+            "text_pattern": self.text_pattern,
+            "subject_contains": self.subject_contains,
+            "group_id_pattern": self.group_id_pattern,
+            "group_id": self.group_id,
+            "thread_id": self.thread_id,
+            "has_media": self.has_media,
+            "has_attachment": self.has_attachment,
+            "has_image": self.has_image,
+            "has_video": self.has_video,
+            "media_type": self.media_type,
+            "day_of_week": self.day_of_week,
+            "hour_of_day": self.hour_of_day,
+        }
     
     def matches_everything(self) -> bool:
         """Return True if this condition matches everything."""
         return all(
-            getattr(self, attr) is None 
-            for attr in [
-                "from_channel", "from_instance", "sender_pattern", "sender_id",
-                "sender_name_contains", "text_contains", "text_pattern",
-                "subject_contains", "group_id_pattern", "group_id",
-                "thread_id", "has_media"
-            ]
+            v is None 
+            for v in self.to_dict().values()
         )
 
 

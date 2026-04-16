@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import fnmatch
-import re
 from typing import TYPE_CHECKING, Any
 
 from ..message import Message
+from ..transforms import get_transform_registry
 from .rule import MatchCondition, RoutingAction, RoutingRule, load_rules_from_config
 
 if TYPE_CHECKING:
@@ -34,6 +33,7 @@ class RoutingEngine:
         self.config = config or {}
         self._rules: list[RoutingRule] = []
         self._extensions: dict[str, Any] = {}
+        self._transform_registry = get_transform_registry()
         self._default_action: str = "keep"
         self._default_instance: str | None = "default"
         self._unprocessed_retention_days: int = 7
@@ -170,6 +170,15 @@ class RoutingEngine:
         result = message
         
         for ext_name in extension_names:
+            transform = self._transform_registry.create(ext_name)
+            if transform:
+                try:
+                    config = self._extensions.get(ext_name, {}).get("config", {})
+                    result = await transform.transform(result, config)
+                except Exception:
+                    pass
+                continue
+            
             ext_config = self._extensions.get(ext_name)
             if not ext_config:
                 continue
@@ -177,7 +186,6 @@ class RoutingEngine:
             try:
                 result = await self._execute_extension(result, ext_config)
             except Exception:
-                # Extension failed - continue with original message
                 pass
         
         return result
@@ -187,7 +195,7 @@ class RoutingEngine:
         message: Message, 
         ext_config: dict[str, Any]
     ) -> Message:
-        """Execute a single extension."""
+        """Execute a single extension from config."""
         transforms = ext_config.get("transforms", [])
         
         result = message
@@ -195,7 +203,6 @@ class RoutingEngine:
             if isinstance(transform, dict):
                 code = transform.get("code")
                 if code:
-                    # Execute code in safe context
                     result = await self._execute_code(result, code, transform.get("config", {}))
         
         return result
@@ -207,13 +214,11 @@ class RoutingEngine:
         config: dict[str, Any]
     ) -> Message:
         """Execute code transformation on message."""
-        # Create a safe context
         context = {
             "msg": message,
             "config": config,
         }
         
-        # Execute the code
         try:
             exec(code, context)
             return context.get("msg", message)
@@ -251,6 +256,7 @@ class RoutingEngine:
             session_id=message.session_id,
             from_instance=message.from_instance,
             sender=message.sender,
+            ts=message.ts,
             text=message.text,
             group_id=message.group_id,
             thread_id=message.thread_id,

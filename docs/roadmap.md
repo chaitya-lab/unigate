@@ -52,6 +52,24 @@
 - [x] Instance state change events (activated/deactivated)
 - [x] Auto-flush outbox when instance becomes ACTIVE
 
+### Routing System (v0.2.1)
+- [x] Config-based routing rules
+- [x] Priority-based rule evaluation
+- [x] Pattern matching (glob, regex)
+- [x] Multiple destinations per rule
+- [x] Default instance for unmatched messages
+- [x] Multi-file routing config support
+- [x] **Matcher plugins** (channel, sender, text, subject, media, time)
+- [x] **Transform plugins** (truncate, extract_subject, add_metadata)
+- [x] **Transport plugins** (HTTP, FTP, WebSocket)
+
+### Plugin Architecture
+- [x] Unified plugin system with type-based discovery
+- [x] `plugin_dirs` config for user plugins
+- [x] Built-in plugins: channels, transforms, transports, matchers
+- [x] Routing rules as user config (outside plugins)
+- [x] See [docs/plugin-architecture.md](plugin-architecture.md) for full design
+
 ## Testing Checklist
 
 - [x] Basic message flow (send/receive)
@@ -69,30 +87,29 @@
 - [x] **Message edit**
 - [x] **Message delete**
 - [x] **Message reactions**
+- [x] **Routing rules**
+- [x] **Matcher plugins**
+- [x] **Transform plugins**
 
-## Phase 3: Routing System (Next)
+## Next Steps
 
-### Routing Engine
-- [ ] Config-based routing rules
-- [ ] Priority-based rule evaluation
-- [ ] Pattern matching (glob, regex)
-- [ ] Multiple destinations per rule
-- [ ] Default instance for unmatched messages
-- [ ] Message retention policies
-- [ ] Multi-file routing config support
-
-### Transform Extensions
-- [ ] New `transform` extension type
-- [ ] Built-in transforms (truncate, extract, convert)
-- [ ] Chain multiple transforms
-- [ ] Error handling per transform
+### Transport Instance Type
+- [ ] Transport instance type for sending via FTP/WebSocket/etc.
+- [ ] Built-in transports: HTTP, FTP, WebSocket, Email, SMS
 
 ### Handler Instance
 - [ ] Handler as special "handler" instance type
 - [ ] Remove fixed handler from gate.py
 - [ ] Handler destination in routing rules
 
-See [docs/routing-design.md](routing-design.md) for full design.
+### More Built-in Matchers
+- [ ] Metadata matcher (match by metadata fields)
+- [ ] Combined condition matcher (AND/OR logic)
+
+### More Built-in Transforms
+- [ ] HTML to text conversion
+- [ ] Language detection
+- [ ] Profanity filter
 
 ## Deferred (Phase 4+)
 

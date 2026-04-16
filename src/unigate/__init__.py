@@ -32,6 +32,13 @@ from .message import (
 )
 from .registry import PluginRegistry, get_registry, register_plugin_dirs
 from .resilience import CircuitBreaker, CircuitState, RetryPolicy
+from .routing import RoutingEngine, RoutingRule, MatchCondition, RoutingAction
+from .routing.matchers import (
+    get_matcher_registry,
+    MatcherRegistry,
+    RoutingMatcher,
+)
+from .routing.matchers.base import RoutingMatcher
 from .runtime import UnigateASGIApp
 from .stores import (
     DeadLetterRecord,
@@ -44,6 +51,16 @@ from .stores import (
     SQLiteStores,
 )
 from .testing import FakeChannel, TestKit
+from .transforms import (
+    TransformExtension,
+    TransformRegistry,
+    get_transform_registry,
+)
+from .transports import (
+    TransportProtocol,
+    TransportRegistry,
+    get_transport_registry,
+)
 
 __all__ = [
     "__version__",
@@ -62,7 +79,10 @@ __all__ = [
     "FakeChannel",
     "FakeWebhookAdapter",
     "FormField",
+    "get_matcher_registry",
     "get_registry",
+    "get_transform_registry",
+    "get_transport_registry",
     "HealthStatus",
     "InMemorySecureStore",
     "InMemoryStores",
@@ -80,6 +100,8 @@ __all__ = [
     "KernelHandle",
     "load_config",
     "load_yaml",
+    "MatcherRegistry",
+    "MatchCondition",
     "MediaRef",
     "MediaType",
     "Message",
@@ -93,6 +115,10 @@ __all__ = [
     "RegisteredInstance",
     "register_plugin_dirs",
     "RetryPolicy",
+    "RoutingAction",
+    "RoutingEngine",
+    "RoutingMatcher",
+    "RoutingRule",
     "SecureStore",
     "SendResult",
     "Sender",
@@ -101,6 +127,10 @@ __all__ = [
     "SQLiteStores",
     "TelegramChannel",
     "TestKit",
+    "TransformExtension",
+    "TransformRegistry",
+    "TransportProtocol",
+    "TransportRegistry",
     "Unigate",
     "UnigateASGIApp",
     "WebChannel",

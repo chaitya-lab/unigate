@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
 import sys
 sys.path.insert(0, "H:/2026/SelfAi/dev/chaitya/unigate/src")
 
@@ -137,6 +138,7 @@ def create_exchange():
     return exchange, stores, test_channel
 
 
+@pytest.mark.asyncio
 async def test_basic_flow():
     """Test 1: Basic message send/receive."""
     print("\n" + "="*50)
@@ -185,6 +187,7 @@ async def test_basic_flow():
     return True
 
 
+@pytest.mark.asyncio
 async def test_dedup():
     """Test 2: Deduplication."""
     print("\n" + "="*50)
@@ -223,6 +226,7 @@ async def test_dedup():
     return True
 
 
+@pytest.mark.asyncio
 async def test_interactive_confirm():
     """Test 3: Interactive confirm buttons."""
     print("\n" + "="*50)
@@ -274,6 +278,7 @@ async def test_interactive_confirm():
     return True
 
 
+@pytest.mark.asyncio
 async def test_interactive_response():
     """Test 4: Interactive response handling."""
     print("\n" + "="*50)
@@ -347,6 +352,7 @@ async def test_interactive_response():
     return True
 
 
+@pytest.mark.asyncio
 async def test_group_mentions():
     """Test 5: Group mentions filtering."""
     print("\n" + "="*50)
@@ -412,6 +418,7 @@ async def test_group_mentions():
     return True
 
 
+@pytest.mark.asyncio
 async def test_thread_support():
     """Test 6: Thread support."""
     print("\n" + "="*50)
@@ -470,6 +477,7 @@ async def test_thread_support():
     return True
 
 
+@pytest.mark.asyncio
 async def test_circuit_breaker():
     """Test 7: Circuit breaker."""
     print("\n" + "="*50)
@@ -489,6 +497,7 @@ async def test_circuit_breaker():
     return True
 
 
+@pytest.mark.asyncio
 async def test_session_routing():
     """Test 8: Session routing."""
     print("\n" + "="*50)
@@ -526,6 +535,7 @@ async def test_session_routing():
     return True
 
 
+@pytest.mark.asyncio
 async def test_multiple_channels():
     """Test 9: Multiple channels."""
     print("\n" + "="*50)
@@ -575,6 +585,7 @@ async def test_multiple_channels():
     return True
 
 
+@pytest.mark.asyncio
 async def test_media_send():
     """Test 10: Media send."""
     print("\n" + "="*50)
@@ -642,6 +653,7 @@ async def test_media_send():
     return True
 
 
+@pytest.mark.asyncio
 async def test_typing_indicator():
     """Test 11: Typing indicator."""
     print("\n" + "="*50)
@@ -693,6 +705,7 @@ async def test_typing_indicator():
     return True
 
 
+@pytest.mark.asyncio
 async def test_message_edit():
     """Test 12: Message edit."""
     print("\n" + "="*50)
@@ -766,6 +779,7 @@ async def test_message_edit():
     return True
 
 
+@pytest.mark.asyncio
 async def test_message_delete():
     """Test 13: Message delete."""
     print("\n" + "="*50)
@@ -833,6 +847,7 @@ async def test_message_delete():
     return True
 
 
+@pytest.mark.asyncio
 async def test_reactions():
     """Test 14: Message reactions."""
     print("\n" + "="*50)
