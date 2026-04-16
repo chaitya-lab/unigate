@@ -53,9 +53,17 @@ class InternalAdapter:
                 ) if ir else None,
             )
         
+        # Instance-scoped session: use explicit session_id or derive from instance:sender
+        explicit_session = raw.get("session_id")
+        if explicit_session:
+            session_id = explicit_session
+        else:
+            sender_id = str(raw.get("sender_id", "user-1"))
+            session_id = f"{self.instance_id}:{sender_id}"
+        
         return Message(
             id=str(raw.get("id", "msg")),
-            session_id=str(raw.get("session_id", "session-1")),
+            session_id=session_id,
             from_instance=self.instance_id,
             sender=Sender(platform_id=str(raw.get("sender_id", "user-1")), name=str(raw.get("sender_name", "User"))),
             ts=raw.get("ts", datetime.now(UTC)),

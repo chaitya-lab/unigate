@@ -333,9 +333,11 @@ class WebUIChannel:
 
     async def _serve_ui(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         from datetime import datetime, timezone
+        # Instance-scoped session for WebUI
+        session_id = f"{self.instance_id}:web:{uuid4().hex[:8]}"
         html = HTML_TEMPLATE.format(
             instance_id=self.instance_id,
-            session_id=str(uuid4())
+            session_id=session_id
         )
         await send({
             "type": "http.response.start",

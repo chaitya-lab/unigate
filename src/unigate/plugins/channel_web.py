@@ -90,9 +90,16 @@ class WebChannel:
                 platform_id=str(sender_data),
                 name=str(sender_data),
             )
+        # Instance-scoped session
+        explicit_session = raw.get("session_id")
+        if explicit_session:
+            session_id = explicit_session
+        else:
+            session_id = f"{self.instance_id}:{sender.platform_id}"
+        
         return Message(
             id=raw.get("id", str(uuid4())),
-            session_id=raw.get("session_id", str(uuid4())),
+            session_id=session_id,
             from_instance=self.instance_id,
             sender=sender,
             ts=raw.get("ts"),

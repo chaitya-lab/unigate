@@ -71,9 +71,13 @@ class WhatsAppChannelPlugin:
         elif msg_type == "contacts":
             text = "[Contacts]"
         
+        # Instance-scoped session
+        sender_id = str(msg.get("from", "unknown"))
+        session_id = f"{self.name}:{sender_id}"
+        
         return Message(
             id=str(msg.get("id", "")),
-            session_id=str(msg.get("from", "unknown")),
+            session_id=session_id,
             from_instance=self.name,
             sender=sender,
             ts=datetime.now(timezone.utc),
@@ -273,9 +277,13 @@ class WhatsAppChannel(BaseChannel):
                 metadata["list_title"] = lst.get("title")
                 text = f"[List: {lst.get('title', '')}]"
         
+        # Instance-scoped session
+        sender_id = str(msg.get("from", "unknown"))
+        session_id = f"{self.instance_id}:{sender_id}"
+        
         return Message(
             id=str(msg.get("id", "")),
-            session_id=str(msg.get("from", "unknown")),
+            session_id=session_id,
             from_instance=self.instance_id,
             sender=sender,
             ts=datetime.fromtimestamp(int(msg.get("timestamp", 0)), timezone.utc),

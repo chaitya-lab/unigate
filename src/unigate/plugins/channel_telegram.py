@@ -176,12 +176,17 @@ class TelegramChannel:
         chat = msg.get("chat", {})
         user = msg.get("from", {})
         
+        # Instance-scoped session: instance_id:chat_id
+        # This ensures conversations are isolated per bot instance
+        chat_id = str(chat.get("id", "unknown"))
+        session_id = f"{self.instance_id}:{chat_id}"
+        
         # Detect if this is an edited message
         edit_of_id = msg.get("edit_date")
         
         return {
             "id": str(msg.get("message_id", "")),
-            "session_id": str(chat.get("id", "unknown")),
+            "session_id": session_id,
             "from_instance": self.instance_id,
             "platform_id": str(msg.get("message_id", "")),
             "sender": {

@@ -88,6 +88,44 @@ State transitions:
 - Health check fails → `degraded`
 - Health recovers → `reconnecting` → `active`
 
+## Sessions
+
+Sessions are **instance-scoped** by default:
+
+```
+session_id = "{instance_id}:{sender_id}"
+Example: "telegram_bot:+1234567890"
+```
+
+This means:
+- Same user on SMS = session "sms:+1234567890"
+- Same user on WhatsApp = session "whatsapp:+1234567890"
+- Separate conversations per instance (simpler, more predictable)
+
+### Cross-Platform Identity (Optional Extension)
+
+To link users across platforms, use the **identity extension**:
+
+```yaml
+extensions:
+  - name: identity
+    config:
+      identity_map:
+        "+1234567890": alice  # Map phone to canonical ID
+      auto_detect: true       # Auto-detect by phone pattern
+```
+
+The extension populates `sender.canonical_id`:
+```python
+if msg.sender.canonical_id == "alice":
+    # Same user on any platform
+```
+
+Benefits:
+- Core stays simple (no built-in cross-platform linking)
+- Pluggable identity (phone, email, custom)
+- Future-proof for new identity providers
+
 ## Storage Model
 
 Five store roles:
