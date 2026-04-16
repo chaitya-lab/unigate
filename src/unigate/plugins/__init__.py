@@ -15,11 +15,9 @@ from .base import (
     register_plugin_dirs,
 )
 
-from .channel_web import WebChannelPlugin
-from .channel_telegram import TelegramChannelPlugin
-from .channel_web_full import WebChannel, APIKeyWebChannel, BearerTokenWebChannel
+from .channel_web import WebChannelPlugin, WebChannel, APIKeyWebChannel, BearerTokenWebChannel
+from .channel_telegram import TelegramChannelPlugin, TelegramChannel
 from .channel_webui import WebUIChannel
-from .channel_telegram_full import TelegramChannel
 from .match_from import FromMatcher, FromPatternMatcher
 from .match_text import TextContainsMatcher, TextPatternMatcher, TextStartsWithMatcher, IsCommandMatcher, SubjectContainsMatcher
 from .match_sender import SenderMatcher, SenderPatternMatcher, SenderNameMatcher, SenderDomainMatcher
