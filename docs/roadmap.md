@@ -64,9 +64,11 @@
 - [x] **Transport plugins** (HTTP, FTP, WebSocket)
 
 ### Plugin Architecture
-- [x] Unified plugin system with type-based discovery
-- [x] `plugin_dirs` config for user plugins
-- [x] Built-in plugins: channels, transforms, transports, matchers
+- [x] Flat `plugins/` directory with naming prefixes
+- [x] Unified `PluginRegistry` for all plugin types
+- [x] Plugin types: `ChannelPlugin`, `MatcherPlugin`, `TransformPlugin`, `TransportPlugin`
+- [x] Auto-discovery from `plugin_dirs` config
+- [x] One file can contain multiple plugins
 - [x] Routing rules as user config (outside plugins)
 - [x] See [docs/plugin-architecture.md](plugin-architecture.md) for full design
 
