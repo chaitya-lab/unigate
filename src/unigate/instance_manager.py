@@ -8,6 +8,7 @@ from typing import Any
 
 from .channel import BaseChannel
 from .lifecycle import HealthStatus, InstanceState, SetupResult, SetupStatus
+from .resilience import CircuitBreaker
 
 
 @dataclass(slots=True)
@@ -21,6 +22,20 @@ class InstanceRuntime:
     retry_base_seconds: int = 2
     retry_max_seconds: int = 30
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    circuit_breaker: CircuitBreaker = field(default_factory=CircuitBreaker)
+
+    def record_success(self) -> None:
+        self.circuit_breaker.record_success()
+        if self.circuit_breaker.state.value == "closed":
+            self.state = InstanceState.ACTIVE
+
+    def record_failure(self) -> None:
+        self.circuit_breaker.record_failure()
+        if self.circuit_breaker.state.value == "open":
+            self.state = InstanceState.DEGRADED
+
+    def can_execute(self) -> bool:
+        return self.circuit_breaker.can_execute()
 
 
 class InstanceManager:

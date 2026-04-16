@@ -44,6 +44,15 @@ class DeadLetterRecord:
     failed_at: datetime
 
 
+@dataclass(slots=True)
+class PendingInteractionRecord:
+    interaction_id: str
+    session_id: str
+    instance_id: str
+    timeout_at: datetime | None
+    created_at: datetime
+
+
 class InboxStore(Protocol):
     async def put(self, record: InboxRecord) -> None: ...
     async def list_inbox(self, limit: int = 50) -> list[InboxRecord]: ...
@@ -67,6 +76,13 @@ class SessionStore(Protocol):
 class DedupStore(Protocol):
     async def seen(self, key: str) -> bool: ...
     async def mark(self, key: str) -> None: ...
+
+
+class InteractionStore(Protocol):
+    async def put_interaction(self, record: PendingInteractionRecord) -> None: ...
+    async def get_interaction(self, session_id: str, instance_id: str) -> PendingInteractionRecord | None: ...
+    async def remove_interaction(self, interaction_id: str) -> None: ...
+    async def cleanup_expired(self, now: datetime) -> list[PendingInteractionRecord]: ...
 
 
 class SecureStore(Protocol):
@@ -249,13 +265,14 @@ class InMemorySecureStore(SecureStore):
         self._values.pop(key, None)
 
 
-class InMemoryStores(InboxStore, OutboxStore, SessionStore, DedupStore):
+class InMemoryStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionStore):
     def __init__(self) -> None:
         self.inbox: list[InboxRecord] = []
         self.outbox: dict[str, OutboxRecord] = {}
         self.sessions: dict[str, str] = {}
         self.dedup: set[str] = set()
         self.dead_letters: list[DeadLetterRecord] = []
+        self.pending_interactions: dict[str, PendingInteractionRecord] = {}
 
     async def put(self, record: InboxRecord) -> None:
         self.inbox.append(record)
@@ -328,8 +345,31 @@ class InMemoryStores(InboxStore, OutboxStore, SessionStore, DedupStore):
     async def mark(self, key: str) -> None:
         self.dedup.add(key)
 
+    async def put_interaction(self, record: PendingInteractionRecord) -> None:
+        key = f"{record.session_id}:{record.instance_id}"
+        self.pending_interactions[key] = record
 
-class SQLiteStores(InboxStore, OutboxStore, SessionStore, DedupStore):
+    async def get_interaction(self, session_id: str, instance_id: str) -> PendingInteractionRecord | None:
+        key = f"{session_id}:{instance_id}"
+        return self.pending_interactions.get(key)
+
+    async def remove_interaction(self, interaction_id: str) -> None:
+        to_remove = [
+            k for k, v in self.pending_interactions.items() if v.interaction_id == interaction_id
+        ]
+        for k in to_remove:
+            del self.pending_interactions[k]
+
+    async def cleanup_expired(self, now: datetime) -> list[PendingInteractionRecord]:
+        expired = []
+        for key, record in list(self.pending_interactions.items()):
+            if record.timeout_at and record.timeout_at <= now:
+                expired.append(record)
+                del self.pending_interactions[key]
+        return expired
+
+
+class SQLiteStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionStore):
     def __init__(self, path: str) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -391,6 +431,18 @@ class SQLiteStores(InboxStore, OutboxStore, SessionStore, DedupStore):
                 """
                 CREATE TABLE IF NOT EXISTS dedup (
                     key TEXT PRIMARY KEY
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pending_interaction (
+                    interaction_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    instance_id TEXT NOT NULL,
+                    timeout_at TEXT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(session_id, instance_id)
                 )
                 """
             )
@@ -547,6 +599,63 @@ class SQLiteStores(InboxStore, OutboxStore, SessionStore, DedupStore):
     async def mark(self, key: str) -> None:
         with self._connect() as conn:
             conn.execute("INSERT OR IGNORE INTO dedup(key) VALUES(?)", (key,))
+
+    async def put_interaction(self, record: PendingInteractionRecord) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO pending_interaction(
+                    interaction_id, session_id, instance_id, timeout_at, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    record.interaction_id,
+                    record.session_id,
+                    record.instance_id,
+                    record.timeout_at.isoformat() if record.timeout_at else None,
+                    record.created_at.isoformat(),
+                ),
+            )
+
+    async def get_interaction(self, session_id: str, instance_id: str) -> PendingInteractionRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM pending_interaction WHERE session_id=? AND instance_id=?",
+                (session_id, instance_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return PendingInteractionRecord(
+            interaction_id=str(row["interaction_id"]),
+            session_id=str(row["session_id"]),
+            instance_id=str(row["instance_id"]),
+            timeout_at=datetime.fromisoformat(str(row["timeout_at"])) if row["timeout_at"] else None,
+            created_at=datetime.fromisoformat(str(row["created_at"])),
+        )
+
+    async def remove_interaction(self, interaction_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM pending_interaction WHERE interaction_id=?", (interaction_id,))
+
+    async def cleanup_expired(self, now: datetime) -> list[PendingInteractionRecord]:
+        expired: list[PendingInteractionRecord] = []
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM pending_interaction WHERE timeout_at IS NOT NULL AND timeout_at <= ?",
+                (now.isoformat(),),
+            ).fetchall()
+        for row in rows:
+            expired.append(
+                PendingInteractionRecord(
+                    interaction_id=str(row["interaction_id"]),
+                    session_id=str(row["session_id"]),
+                    instance_id=str(row["instance_id"]),
+                    timeout_at=datetime.fromisoformat(str(row["timeout_at"])) if row["timeout_at"] else None,
+                    created_at=datetime.fromisoformat(str(row["created_at"])),
+                )
+            )
+            conn.execute("DELETE FROM pending_interaction WHERE interaction_id=?", (str(row["interaction_id"]),))
+        return expired
 
 
 class NamespacedSecureStore(SecureStore):

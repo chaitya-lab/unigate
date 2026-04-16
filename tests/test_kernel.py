@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import unittest
 
 from unigate import Exchange, InternalAdapter, Message, NamespacedSecureStore, Sender
+from unigate.resilience import CircuitBreaker, CircuitState
 from unigate.stores import InMemoryStores
 
 
@@ -47,7 +48,7 @@ class KernelTests(unittest.IsolatedAsyncioTestCase):
         await self.exchange.enqueue_outbound("default", outbound)
         await self.exchange.flush_outbox()
         self.assertEqual(len(self.adapter.sent), 1)
-        self.assertEqual(self.adapter.sent[0].to, ["origin-user"])
+        self.assertEqual(self.adapter.sent[0].to, ["default"])
 
     async def test_fanout_isolated_records(self) -> None:
         outbound = Message(
@@ -71,7 +72,7 @@ class KernelTests(unittest.IsolatedAsyncioTestCase):
             from_instance="default",
             sender=Sender(platform_id="bot", name="Bot", is_bot=True),
             ts=datetime.now(UTC),
-            to=["u2"],
+            to=["default"],
             text="will retry",
         )
         await self.exchange.enqueue_outbound("default", outbound)
@@ -89,7 +90,7 @@ class KernelTests(unittest.IsolatedAsyncioTestCase):
             from_instance="default",
             sender=Sender(platform_id="bot", name="Bot", is_bot=True),
             ts=datetime.now(UTC),
-            to=["u9"],
+            to=["default"],
             text="dead letter case",
         )
         await self.exchange.enqueue_outbound("default", outbound)
@@ -97,3 +98,79 @@ class KernelTests(unittest.IsolatedAsyncioTestCase):
         dead_letters = await self.memory.list_dead_letters()
         self.assertEqual(len(dead_letters), 1)
         self.assertEqual(dead_letters[0].message.id, "out-dead")
+
+
+class CircuitBreakerTests(unittest.IsolatedAsyncioTestCase):
+    def test_circuit_breaker_closed_by_default(self) -> None:
+        cb = CircuitBreaker()
+        self.assertEqual(cb.state, CircuitState.CLOSED)
+
+    def test_circuit_breaker_opens_after_threshold(self) -> None:
+        cb = CircuitBreaker(failure_threshold=3)
+        for _ in range(3):
+            cb.record_failure()
+        self.assertEqual(cb.state, CircuitState.OPEN)
+
+    def test_circuit_breaker_half_open_after_timeout(self) -> None:
+        cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.1)
+        cb.record_failure()
+        self.assertEqual(cb.state, CircuitState.OPEN)
+        import time
+        time.sleep(0.15)
+        self.assertTrue(cb.can_execute())
+        self.assertEqual(cb.state, CircuitState.HALF_OPEN)
+
+    def test_circuit_breaker_success_resets_after_half_open(self) -> None:
+        cb = CircuitBreaker(failure_threshold=2, recovery_timeout=0.01)
+        cb.record_failure()
+        cb.record_failure()
+        self.assertEqual(cb.state, CircuitState.OPEN)
+        import time
+        time.sleep(0.02)
+        cb.can_execute()
+        self.assertEqual(cb.state, CircuitState.HALF_OPEN)
+        cb.record_success()
+        self.assertEqual(cb.state, CircuitState.CLOSED)
+
+    async def test_circuit_breaker_integration(self) -> None:
+        memory = InMemoryStores()
+        exchange = Exchange(
+            inbox=memory, outbox=memory, sessions=memory, dedup=memory
+        )
+        store = NamespacedSecureStore()
+        adapter = InternalAdapter(
+            "default", store.for_instance("default"), exchange, config={}
+        )
+        exchange.register_instance("default", adapter)
+        exchange.set_circuit_breaker("default", failure_threshold=2)
+        adapter.fail_next_send = True
+
+        outbound = Message(
+            id="cb-1",
+            session_id="s-cb",
+            from_instance="default",
+            sender=Sender(platform_id="bot", name="Bot", is_bot=True),
+            ts=datetime.now(UTC),
+            to=["default"],
+            text="test",
+        )
+        await exchange.enqueue_outbound("default", outbound)
+        await exchange.flush_outbox()
+        runtime = exchange.instance_manager.instances["default"]
+        self.assertEqual(runtime.circuit_breaker.state, CircuitState.CLOSED)
+
+        adapter.fail_next_send = True
+        outbound2 = Message(
+            id="cb-2",
+            session_id="s-cb-2",
+            from_instance="default",
+            sender=Sender(platform_id="bot", name="Bot", is_bot=True),
+            ts=datetime.now(UTC),
+            to=["default"],
+            text="test2",
+        )
+        await exchange.enqueue_outbound("default", outbound2)
+        await exchange.flush_outbox()
+
+        runtime = exchange.instance_manager.instances["default"]
+        self.assertEqual(runtime.circuit_breaker.state, CircuitState.OPEN)

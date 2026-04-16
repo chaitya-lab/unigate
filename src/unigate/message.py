@@ -48,6 +48,26 @@ class MediaRef:
     full_url: str | None = None
     resolved: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    _data: bytes | None = None
+
+    async def resolve(self) -> bytes:
+        """Fetch media bytes on demand."""
+        if self._data is not None:
+            return self._data
+        if self.full_url is None:
+            raise ValueError(f"No URL to resolve for media {self.media_id}")
+        import urllib.request
+        with urllib.request.urlopen(self.full_url) as resp:
+            self._data = resp.read()
+        return self._data
+
+    async def resolve_url(self) -> str:
+        """Return or resolve the full URL for this media."""
+        if self.full_url:
+            return self.full_url
+        if self.thumbnail_url:
+            return self.thumbnail_url
+        raise ValueError(f"No URL available for media {self.media_id}")
 
 
 class InteractionType:

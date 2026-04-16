@@ -13,7 +13,16 @@ from .extensions import EventExtension, ExtensionDecision, InboundExtension, Out
 from .events import KernelEvent
 from .instance_manager import InstanceManager
 from .message import Message
-from .stores import DedupStore, InboxRecord, InboxStore, OutboxRecord, OutboxStore, SessionStore
+from .stores import (
+    DedupStore,
+    InboxRecord,
+    InboxStore,
+    InteractionStore,
+    OutboxRecord,
+    OutboxStore,
+    PendingInteractionRecord,
+    SessionStore,
+)
 
 
 Handler = Callable[[Message], Awaitable[Message | list[Message] | None] | Message | list[Message] | None]
@@ -36,6 +45,7 @@ class Exchange:
         outbox: OutboxStore,
         sessions: SessionStore,
         dedup: DedupStore,
+        interactions: InteractionStore | None = None,
         max_concurrency: int = 64,
     ) -> None:
         self.instances: dict[str, RegisteredInstance] = {}
@@ -45,6 +55,7 @@ class Exchange:
         self._outbox = outbox
         self._sessions = sessions
         self._dedup = dedup
+        self._interactions = interactions
         self._lock = asyncio.Semaphore(max_concurrency)
         self._inbound_extensions: list[InboundExtension] = []
         self._outbound_extensions: list[OutboundExtension] = []
@@ -68,6 +79,22 @@ class Exchange:
         runtime.max_attempts = max_attempts
         runtime.retry_base_seconds = retry_base_seconds
         runtime.retry_max_seconds = retry_max_seconds
+
+    def set_circuit_breaker(
+        self,
+        instance_id: str,
+        *,
+        failure_threshold: int = 5,
+        recovery_timeout: float = 60.0,
+        half_open_max_requests: int = 1,
+    ) -> None:
+        from .resilience import CircuitBreaker
+        runtime = self.instance_manager.instances[instance_id]
+        runtime.circuit_breaker = CircuitBreaker(
+            failure_threshold=failure_threshold,
+            recovery_timeout=recovery_timeout,
+            half_open_max_requests=half_open_max_requests,
+        )
 
     def set_handler(self, handler: Handler) -> Handler:
         """Attach the exchange handler."""
@@ -108,8 +135,18 @@ class Exchange:
                 )
             )
             await self.emit_event(KernelEvent(name="inbox.persisted", payload={"message_id": message.id}))
-            if message.sender.platform_id:
-                await self._sessions.set_origin(message.session_id, message.sender.platform_id)
+            await self._sessions.set_origin(message.session_id, instance_id)
+            if self._interactions is not None:
+                pending = await self._interactions.get_interaction(message.session_id, instance_id)
+                if pending is not None and message.interactive:
+                    message.interactive.response = message.interactive.response
+                    await self._interactions.remove_interaction(pending.interaction_id)
+                    await self.emit_event(
+                        KernelEvent(
+                            name="interaction.correlated",
+                            payload={"interaction_id": pending.interaction_id, "message_id": message.id},
+                        )
+                    )
             inbound = await self._apply_inbound_extensions(message)
             if inbound is None:
                 await self.emit_event(KernelEvent(name="inbound.dropped", payload={"message_id": message.id}))
@@ -170,6 +207,29 @@ class Exchange:
         if prepared is None:
             await self.emit_event(KernelEvent(name="outbound.dropped", payload={"message_id": message.id}))
             return
+        if self._interactions is not None and prepared.interactive is not None:
+            timeout_at = None
+            if prepared.interactive.timeout_seconds:
+                timeout_at = datetime.now(UTC) + timedelta(seconds=prepared.interactive.timeout_seconds)
+            await self._interactions.put_interaction(
+                PendingInteractionRecord(
+                    interaction_id=prepared.interactive.interaction_id,
+                    session_id=message.session_id,
+                    instance_id=from_instance,
+                    timeout_at=timeout_at,
+                    created_at=datetime.now(UTC),
+                )
+            )
+            await self.emit_event(
+                KernelEvent(
+                    name="interaction.pending",
+                    payload={
+                        "interaction_id": prepared.interactive.interaction_id,
+                        "session_id": message.session_id,
+                        "timeout_seconds": prepared.interactive.timeout_seconds,
+                    },
+                )
+            )
         records: list[OutboxRecord] = []
         for destination in destinations:
             fanout_message = replace(
@@ -194,11 +254,24 @@ class Exchange:
         now = now or datetime.now(UTC)
         due_records = await self._outbox.due(now)
         for record in due_records:
-            channel = self.instances[record.instance_id].channel
+            runtime = self.instance_manager.instances.get(record.destination)
+            if runtime is None:
+                await self._outbox.move_to_dead_letter(record.outbox_id, "instance not found")
+                continue
+            if not runtime.can_execute():
+                await self.emit_event(
+                    KernelEvent(
+                        name="circuit_breaker.open",
+                        payload={"instance_id": record.destination, "outbox_id": record.outbox_id},
+                    )
+                )
+                continue
+            channel = runtime.channel
             try:
                 result = await channel.from_message(record.message)
                 if result.success:
                     await self._outbox.mark_sent(record.outbox_id)
+                    runtime.record_success()
                     await self.emit_event(
                         KernelEvent(
                             name="outbox.sent",
@@ -206,16 +279,18 @@ class Exchange:
                         )
                     )
                 else:
+                    runtime.record_failure()
                     await self._schedule_retry_or_dead_letter(
-                        record.instance_id,
+                        record.destination,
                         record.outbox_id,
                         record.attempts,
                         result.error or "send failed",
                         now,
                     )
             except Exception as exc:
+                runtime.record_failure()
                 await self._schedule_retry_or_dead_letter(
-                    record.instance_id,
+                    record.destination,
                     record.outbox_id,
                     record.attempts,
                     str(exc),

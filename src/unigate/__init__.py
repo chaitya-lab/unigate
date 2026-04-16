@@ -4,8 +4,16 @@ from .capabilities import ChannelCapabilities
 from .adapters import FakeWebhookAdapter, InternalAdapter
 from .channel import BaseChannel, KernelHandle, RawRequest, SecureStore, SendResult
 from .cli import main
-from .extensions import EventExtension, ExtensionDecision, InboundExtension, OutboundExtension
+from .config import load_config, load_yaml
+from .extensions import (
+    EventExtension,
+    ExtensionDecision,
+    InboundExtension,
+    OutboundExtension,
+    create_extension,
+)
 from .events import KernelEvent
+from .gate import Unigate
 from .instance_manager import InstanceManager, InstanceRuntime
 from .kernel import Exchange, RegisteredInstance
 from .lifecycle import HealthStatus, InstanceState, SetupResult, SetupStatus
@@ -21,57 +29,75 @@ from .message import (
     Reaction,
     Sender,
 )
+from .registry import PluginRegistry, get_registry, register_plugin_dirs
+from .resilience import CircuitBreaker, CircuitState, RetryPolicy
 from .runtime import UnigateASGIApp
 from .stores import (
     DeadLetterRecord,
-    InboxRecord,
     InMemorySecureStore,
     InMemoryStores,
+    InteractionStore,
     NamespacedSecureStore,
     OutboxRecord,
+    PendingInteractionRecord,
     SQLiteStores,
 )
+from .testing import FakeChannel, TestKit
 
 __all__ = [
     "__version__",
     "Action",
-    "FakeWebhookAdapter",
     "BaseChannel",
     "ChannelCapabilities",
-    "EventExtension",
-    "ExtensionDecision",
-    "Exchange",
+    "CircuitBreaker",
+    "CircuitState",
+    "create_extension",
     "DeadLetterRecord",
+    "EventExtension",
+    "Exchange",
+    "ExtensionDecision",
+    "FakeChannel",
+    "FakeWebhookAdapter",
+    "FormField",
+    "get_registry",
+    "HealthStatus",
     "InMemorySecureStore",
     "InMemoryStores",
-    "FormField",
-    "HealthStatus",
     "InboundExtension",
     "InstanceManager",
-    "InstanceState",
     "InstanceRuntime",
+    "InstanceState",
     "InternalAdapter",
     "InboxRecord",
     "Interactive",
     "InteractiveResponse",
+    "InteractionStore",
     "InteractionType",
     "KernelEvent",
     "KernelHandle",
+    "load_config",
+    "load_yaml",
     "MediaRef",
     "MediaType",
     "Message",
     "NamespacedSecureStore",
     "OutboxRecord",
     "OutboundExtension",
+    "PendingInteractionRecord",
+    "PluginRegistry",
     "RawRequest",
     "Reaction",
     "RegisteredInstance",
-    "SendResult",
-    "SQLiteStores",
+    "register_plugin_dirs",
+    "RetryPolicy",
     "SecureStore",
+    "SendResult",
     "Sender",
     "SetupResult",
     "SetupStatus",
+    "SQLiteStores",
+    "TestKit",
+    "Unigate",
     "UnigateASGIApp",
     "main",
 ]

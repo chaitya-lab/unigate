@@ -108,14 +108,14 @@ class StorageRuntimeTests(unittest.IsolatedAsyncioTestCase):
             from_instance="inst",
             sender=Sender(platform_id="bot", name="Bot", is_bot=True),
             ts=datetime.now(UTC),
-            to=["u-dead"],
+            to=["inst"],
             text="must dead letter",
         )
         await exchange.enqueue_outbound("inst", outbound)
         await exchange.flush_outbox()
         dead_letters = await stores.list_dead_letters()
         self.assertEqual(len(dead_letters), 1)
-        self.assertEqual(dead_letters[0].outbox_id.startswith("dead-1:u-dead"), True)
+        self.assertEqual(dead_letters[0].outbox_id.startswith("dead-1:inst"), True)
 
     async def test_sqlite_roundtrip_preserves_rich_message_fields(self) -> None:
         path = f"{tempfile.gettempdir()}/unigate-test-{uuid4().hex}.db"
