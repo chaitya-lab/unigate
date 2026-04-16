@@ -38,7 +38,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(default["max_attempts"], 5)
 
     def test_dead_letters_command_requires_daemon(self) -> None:
-        """dead-letters requires daemon to be running"""
-        code, _, err = self._run(["dead-letters"])
+        """dead-letters list requires daemon to be running"""
+        code, _, err = self._run(["dead-letters", "list"])
         self.assertEqual(code, 1)
         self.assertIn("daemon not running", err)

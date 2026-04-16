@@ -13,6 +13,7 @@ from .extensions import EventExtension, ExtensionDecision, InboundExtension, Out
 from .events import KernelEvent
 from .instance_manager import InstanceManager
 from .message import Message
+from .storage_config import StorageConfig, StorageFactory
 from .stores import (
     DedupStore,
     InboxRecord,
@@ -48,6 +49,8 @@ class Exchange:
         interactions: InteractionStore | None = None,
         max_concurrency: int = 64,
         routing_config: dict | None = None,
+        cleanup_interval_seconds: int = 3600,
+        default_storage: StorageConfig | None = None,
     ) -> None:
         self.instances: dict[str, RegisteredInstance] = {}
         self.events: list[KernelEvent] = []
@@ -63,7 +66,13 @@ class Exchange:
         self._event_extensions: list[EventExtension] = []
         self._tasks: set[asyncio.Task] = set()
         self._health_check_task: asyncio.Task | None = None
+        self._cleanup_task: asyncio.Task | None = None
+        self._cleanup_interval = cleanup_interval_seconds
+        self._default_storage = default_storage or StorageConfig(backend="memory")
         self.instance_manager = InstanceManager()
+        
+        # Per-instance storage overrides
+        self._instance_storages: dict[str, tuple[InboxStore, OutboxStore, SessionStore, DedupStore, InteractionStore]] = {}
         
         # Routing engine
         self._routing_engine = None
@@ -76,13 +85,27 @@ class Exchange:
         if routing_config:
             self.setup_routing(routing_config)
 
+    def get_instance_stores(self, instance_id: str) -> tuple[InboxStore, OutboxStore, SessionStore, DedupStore, InteractionStore]:
+        """Get storage for a specific instance."""
+        if instance_id in self._instance_storages:
+            return self._instance_storages[instance_id]
+        return self._inbox, self._outbox, self._sessions, self._dedup, self._interactions
+
     def register_instance(
         self, 
         instance_id: str, 
         channel: BaseChannel,
         fallback_instances: list[str] | None = None,
+        storage: StorageConfig | None = None,
     ) -> RegisteredInstance:
-        """Register one named instance."""
+        """Register one named instance with optional per-instance storage."""
+        # Create per-instance storage if configured
+        if storage and storage.backend != "memory":
+            inbox, outbox, sessions, dedup, interactions = StorageFactory.create_stores(
+                storage, namespace=instance_id
+            )
+            self._instance_storages[instance_id] = (inbox, outbox, sessions, dedup, interactions)
+        
         runtime = self.instance_manager.register(
             instance_id, 
             channel,
@@ -313,48 +336,81 @@ class Exchange:
         now = now or datetime.now(UTC)
         due_records = await self._outbox.due(now)
         for record in due_records:
-            runtime = self.instance_manager.instances.get(record.destination)
-            if runtime is None:
-                await self._outbox.move_to_dead_letter(record.outbox_id, "instance not found")
-                continue
-            if not runtime.can_execute():
+            success = await self._send_to_instance(record, now)
+            if not success:
+                # Try fallback instances if primary failed
+                runtime = self.instance_manager.instances.get(record.destination)
+                if runtime and runtime.fallback_instances:
+                    tried = {record.destination}
+                    for fallback_id in runtime.fallback_instances:
+                        if fallback_id in tried:
+                            continue
+                        fallback_record = record
+                        fallback_record.destination = fallback_id
+                        success = await self._send_to_instance(fallback_record, now)
+                        if success:
+                            await self.emit_event(
+                                KernelEvent(
+                                    name="outbox.sent_via_fallback",
+                                    payload={
+                                        "outbox_id": record.outbox_id,
+                                        "primary": record.destination,
+                                        "fallback": fallback_id,
+                                    },
+                                )
+                            )
+                            break
+                        tried.add(fallback_id)
+
+    async def _send_to_instance(self, record: OutboxRecord, now: datetime) -> bool:
+        """Try to send a message to an instance. Returns True on success."""
+        runtime = self.instance_manager.instances.get(record.destination)
+        if runtime is None:
+            await self._outbox.move_to_dead_letter(record.outbox_id, f"instance not found: {record.destination}")
+            return False
+        
+        if not runtime.can_execute():
+            await self.emit_event(
+                KernelEvent(
+                    name="circuit_breaker.open",
+                    payload={"instance_id": record.destination, "outbox_id": record.outbox_id},
+                )
+            )
+            return False
+        
+        channel = runtime.channel
+        try:
+            result = await channel.from_message(record.message)
+            if result.success:
+                await self._outbox.mark_sent(record.outbox_id)
+                runtime.record_success()
                 await self.emit_event(
                     KernelEvent(
-                        name="circuit_breaker.open",
-                        payload={"instance_id": record.destination, "outbox_id": record.outbox_id},
+                        name="outbox.sent",
+                        payload={"outbox_id": record.outbox_id, "provider_id": result.provider_message_id},
                     )
                 )
-                continue
-            channel = runtime.channel
-            try:
-                result = await channel.from_message(record.message)
-                if result.success:
-                    await self._outbox.mark_sent(record.outbox_id)
-                    runtime.record_success()
-                    await self.emit_event(
-                        KernelEvent(
-                            name="outbox.sent",
-                            payload={"outbox_id": record.outbox_id, "provider_id": result.provider_message_id},
-                        )
-                    )
-                else:
-                    runtime.record_failure()
-                    await self._schedule_retry_or_dead_letter(
-                        record.destination,
-                        record.outbox_id,
-                        record.attempts,
-                        result.error or "send failed",
-                        now,
-                    )
-            except Exception as exc:
+                return True
+            else:
                 runtime.record_failure()
                 await self._schedule_retry_or_dead_letter(
                     record.destination,
                     record.outbox_id,
                     record.attempts,
-                    str(exc),
+                    result.error or "send failed",
                     now,
                 )
+                return False
+        except Exception as exc:
+            runtime.record_failure()
+            await self._schedule_retry_or_dead_letter(
+                record.destination,
+                record.outbox_id,
+                record.attempts,
+                str(exc),
+                now,
+            )
+            return False
 
     async def _schedule_retry_or_dead_letter(
         self,
@@ -436,6 +492,39 @@ class Exchange:
             except Exception:
                 pass
 
+    async def cleanup_loop(self) -> None:
+        """
+        Background task that periodically cleans up old data.
+        Runs auto_cleanup on the storage backends.
+        """
+        while True:
+            await asyncio.sleep(self._cleanup_interval)
+            try:
+                if hasattr(self._outbox, 'auto_cleanup'):
+                    deleted = await self._outbox.auto_cleanup()
+                    if deleted > 0:
+                        await self.emit_event(
+                            KernelEvent(
+                                name="cleanup.completed",
+                                payload={"deleted_count": deleted},
+                            )
+                        )
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    async def start_cleanup_task(self) -> None:
+        """Start the background cleanup task."""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self.cleanup_loop())
+
+    async def run_cleanup_once(self) -> int:
+        """Run cleanup once and return deleted count."""
+        if hasattr(self._outbox, 'auto_cleanup'):
+            return await self._outbox.auto_cleanup()
+        return 0
+
     async def shutdown(self, timeout: float = 30.0) -> None:
         """
         Graceful shutdown - flush outbox and stop all instances.
@@ -450,6 +539,14 @@ class Exchange:
             self._health_check_task.cancel()
             try:
                 await self._health_check_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Stop cleanup loop
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
             except asyncio.CancelledError:
                 pass
         

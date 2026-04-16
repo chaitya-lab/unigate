@@ -361,6 +361,7 @@ def _load_builtins(registry: PluginRegistry) -> None:
     """Load built-in plugins."""
     from .channel_web import WebChannelPlugin
     from .channel_telegram import TelegramChannelPlugin
+    from .channel_whatsapp import WhatsAppChannelPlugin
     from .match_from import FromMatcher
     from .match_text import TextContainsMatcher, TextPatternMatcher
     from .match_sender import SenderMatcher, SenderPatternMatcher
@@ -370,10 +371,13 @@ def _load_builtins(registry: PluginRegistry) -> None:
     from .transform_extract import ExtractSubjectTransform
     from .transform_add import AddMetadataTransform, AddTimestampTransform
     from .transport_http import HTTPTransport
+    from .transport_websocket import WebSocketTransport
+    from .transport_ftp import FTPTransport, SFTPTransport, FileTransport
     
     for cls in [
         WebChannelPlugin,
         TelegramChannelPlugin,
+        WhatsAppChannelPlugin,
         FromMatcher,
         TextContainsMatcher,
         TextPatternMatcher,
@@ -388,6 +392,10 @@ def _load_builtins(registry: PluginRegistry) -> None:
         AddMetadataTransform,
         AddTimestampTransform,
         HTTPTransport,
+        WebSocketTransport,
+        FTPTransport,
+        SFTPTransport,
+        FileTransport,
     ]:
         registry.register(cls, "builtin")
 
@@ -434,10 +442,16 @@ def resolve_type(type_str: str) -> str:
     if "." in type_str:
         return type_str
     
-    if type_str in ("telegram", "web", "whatsapp", "email", "sms", "slack", "discord"):
+    if type_str in ("telegram", "web", "webui", "whatsapp", "email", "sms", "slack", "discord"):
         return f"channel.{type_str}"
     
-    if type_str in ("http", "ftp", "websocket", "smtp", "smtp_email"):
+    if type_str in ("http", "webhook", "ftp", "sftp", "websocket", "file", "smtp", "smtp_email"):
         return f"transport.{type_str}"
+    
+    if type_str in ("from", "text_contains", "text_pattern", "sender", "has_media", "day_of_week", "hour_of_day"):
+        return f"match.{type_str}"
+    
+    if type_str in ("truncate", "extract_subject", "add_metadata", "add_timestamp"):
+        return f"transform.{type_str}"
     
     return f"channel.{type_str}"

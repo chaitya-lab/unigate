@@ -100,9 +100,81 @@ Five store roles:
 | dedup | Idempotency | `seen()`, `mark()` |
 | secure | Credentials | `get()`, `set()` |
 
+### Storage Backends
+
+| Backend | Use Case | Command Line |
+|---------|----------|--------------|
+| `memory` | Testing, dev | Default |
+| `sqlite` | Production, single instance | `--backend sqlite` |
+| `file` | Debugging, easy backup | `--backend file` |
+
+### Storage Configuration
+
+Global defaults via CLI:
+```bash
+unigate start --backend sqlite --storage-path ~/.unigate/unigate.db --retention 14
+```
+
+Per-instance overrides via YAML config:
+```yaml
+storage:
+  default: sqlite  # Global default backend
+  default_path: ~/.unigate/unigate.db
+
+instances:
+  # Uses global default (sqlite)
+  telegram_main:
+    type: telegram
+    
+  # Custom file storage for debugging
+  debug_bot:
+    type: web
+    storage:
+      backend: file
+      path: ./debug_data
+      
+  # Separate SQLite for high-volume instance
+  high_volume:
+    type: telegram
+    storage:
+      backend: sqlite
+      path: ./data/high_volume.db
+```
+
+### FileStore Structure
+
+Each message stored as JSON with rich metadata:
+```json
+{
+  "type": "inbox",
+  "namespace": "telegram_main",
+  "message_id": "msg123",
+  "instance_id": "telegram_main",
+  "sender": {"id": "user456", "name": "John"},
+  "received_at": "2024-01-01T12:00:00Z",
+  "text": "Hello",
+  "has_media": false,
+  "raw": {...}
+}
+```
+
+Directory structure:
+```
+~/.unigate/data/
+├── inbox/
+│   └── 20240101_120000_000000_telegram_inbox_msg123.json
+├── outbox/
+├── sent/
+├── dead_letters/
+├── sessions/
+├── dedup/
+└── interactions/
+```
+
 Built-in implementations:
-- `InMemoryStores` - For testing
-- `SQLiteStores` - For persistence
+- `InMemoryStores` - For testing, no persistence
+- `SQLiteStores` - Single-file SQLite, fast queries
+- `FileStores` - Human-readable JSON files, easy inspection
 
 ## Resilience
 

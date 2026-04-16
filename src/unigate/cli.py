@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import multiprocessing
 import os
 import socket
 import sys
@@ -18,7 +19,8 @@ import yaml
 
 from .adapters import InternalAdapter
 from .kernel import Exchange
-from .stores import InMemoryStores, NamespacedSecureStore
+from .storage_config import StorageConfig, StorageFactory
+from .stores import InMemoryStores, NamespacedSecureStore, SQLiteStores, FileStores
 
 
 DEFAULT_SOCKET_PATH = Path.home() / ".unigate" / "daemon.sock"
@@ -29,9 +31,31 @@ def get_daemon_paths() -> tuple[Path, Path]:
     return DEFAULT_SOCKET_PATH, DEFAULT_PID_PATH
 
 
-def build_exchange(config_path: str | None = None) -> Exchange:
-    memory = InMemoryStores()
-    exchange = Exchange(inbox=memory, outbox=memory, sessions=memory, dedup=memory)
+def build_exchange(
+    config_path: str | None = None,
+    storage_backend: str = "memory",
+    storage_path: str | None = None,
+    retention_days: int = 7,
+) -> Exchange:
+    """Build exchange with specified storage backend."""
+    storage_config = StorageConfig(
+        backend=storage_backend,
+        path=storage_path,
+        retention_days=retention_days,
+    )
+    
+    inbox, outbox, sessions, dedup, interactions = StorageFactory.create_stores(
+        storage_config, namespace="default"
+    )
+    
+    exchange = Exchange(
+        inbox=inbox,
+        outbox=outbox,
+        sessions=sessions,
+        dedup=dedup,
+        interactions=interactions,
+        default_storage=storage_config,
+    )
     store = NamespacedSecureStore()
     adapter = InternalAdapter("default", store.for_instance("default"), exchange)
     exchange.register_instance("default", adapter)
@@ -40,6 +64,7 @@ def build_exchange(config_path: str | None = None) -> Exchange:
 
 
 def send_daemon_command(command: dict[str, Any]) -> dict[str, Any]:
+    """Send command to running daemon via Unix socket."""
     socket_path, _ = get_daemon_paths()
     if not socket_path.exists():
         return {"error": "daemon not running"}
@@ -62,6 +87,7 @@ def send_daemon_command(command: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    """Handle incoming daemon client connection."""
     try:
         data = await reader.readuntil(b"\n")
         command = json.loads(data.decode().strip())
@@ -78,6 +104,7 @@ async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
 
 async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
+    """Process command from daemon client."""
     cmd = command.get("command")
     args = command.get("args", {})
     
@@ -105,7 +132,11 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
     
     if cmd == "inbox_list":
         limit = args.get("limit", 50)
-        records = await _daemon_exchange._inbox.list_inbox(limit=limit)
+        instance_filter = args.get("instance")
+        records = await _daemon_exchange._inbox.list_inbox(limit=limit * 10)
+        if instance_filter:
+            records = [r for r in records if r.instance_id == instance_filter]
+        records = records[:limit]
         return {
             "count": len(records),
             "records": [
@@ -113,6 +144,8 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
                     "message_id": r.message_id,
                     "instance_id": r.instance_id,
                     "received_at": r.received_at.isoformat(),
+                    "text": r.message.text[:50] if r.message.text else "(no text)",
+                    "sender": r.message.sender.name,
                 }
                 for r in records
             ],
@@ -120,7 +153,7 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
     
     if cmd == "inbox_show":
         msg_id = args.get("message_id")
-        records = await _daemon_exchange._inbox.list_inbox(limit=1000)
+        records = await _daemon_exchange._inbox.list_inbox(limit=10000)
         for r in records:
             if r.message_id == msg_id:
                 return {
@@ -128,21 +161,36 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
                     "instance_id": r.instance_id,
                     "received_at": r.received_at.isoformat(),
                     "message": _message_to_dict(r.message),
+                    "full_message": _message_to_full_dict(r.message),
                 }
         return {"error": "message not found"}
     
     if cmd == "inbox_replay":
         msg_id = args.get("message_id")
-        records = await _daemon_exchange._inbox.list_inbox(limit=1000)
+        records = await _daemon_exchange._inbox.list_inbox(limit=10000)
         for r in records:
             if r.message_id == msg_id:
                 await _daemon_exchange.ingest(r.instance_id, r.message.raw)
                 return {"ok": True, "message_id": msg_id}
         return {"error": "message not found"}
     
+    if cmd == "inbox_skip":
+        msg_id = args.get("message_id")
+        await _daemon_exchange.emit_event(
+            _daemon_exchange.events[0].__class__(name="inbox.skipped", payload={"message_id": msg_id})
+        )
+        return {"ok": True, "message_id": msg_id, "action": "skipped"}
+    
     if cmd == "outbox_list":
         limit = args.get("limit", 50)
-        records = await _daemon_exchange._outbox.list_outbox(limit=limit)
+        instance_filter = args.get("instance")
+        status_filter = args.get("status")
+        records = await _daemon_exchange._outbox.list_outbox(limit=limit * 10)
+        if instance_filter:
+            records = [r for r in records if r.destination == instance_filter]
+        if status_filter:
+            records = [r for r in records if r.status == status_filter]
+        records = records[:limit]
         return {
             "count": len(records),
             "records": [
@@ -151,7 +199,8 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
                     "destination": r.destination,
                     "status": r.status,
                     "attempts": r.attempts,
-                    "last_error": r.last_error,
+                    "last_error": r.last_error[:100] if r.last_error else None,
+                    "next_retry": r.next_attempt_at.isoformat() if r.next_attempt_at else None,
                 }
                 for r in records
             ],
@@ -159,7 +208,7 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
     
     if cmd == "outbox_show":
         outbox_id = args.get("outbox_id")
-        records = await _daemon_exchange._outbox.list_outbox(limit=1000)
+        records = await _daemon_exchange._outbox.list_outbox(limit=10000)
         for r in records:
             if r.outbox_id == outbox_id:
                 return {
@@ -168,7 +217,8 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
                     "status": r.status,
                     "attempts": r.attempts,
                     "last_error": r.last_error,
-                    "message": _message_to_dict(r.message),
+                    "next_retry": r.next_attempt_at.isoformat() if r.next_attempt_at else None,
+                    "message": _message_to_full_dict(r.message),
                 }
         return {"error": "outbox record not found"}
     
@@ -181,6 +231,15 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
         await _daemon_exchange._outbox.move_to_dead_letter(outbox_id, "manual fail")
         return {"ok": True, "outbox_id": outbox_id}
     
+    if cmd == "outbox_skip":
+        outbox_id = args.get("outbox_id")
+        records = await _daemon_exchange._outbox.list_outbox(limit=10000)
+        for r in records:
+            if r.outbox_id == outbox_id:
+                await _daemon_exchange._outbox.mark_sent(outbox_id)
+                return {"ok": True, "outbox_id": outbox_id, "action": "skipped"}
+        return {"error": "outbox record not found"}
+    
     if cmd == "dead_letters":
         limit = args.get("limit", 50)
         records = await _daemon_exchange._outbox.list_dead_letters(limit=limit)
@@ -191,12 +250,36 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
                     "outbox_id": r.outbox_id,
                     "destination": r.destination,
                     "attempts": r.attempts,
-                    "last_error": r.last_error,
+                    "last_error": r.last_error[:100] if r.last_error else None,
                     "failed_at": r.failed_at.isoformat(),
                 }
                 for r in records
             ],
         }
+    
+    if cmd == "dead_letters_show":
+        outbox_id = args.get("outbox_id")
+        records = await _daemon_exchange._outbox.list_dead_letters(limit=10000)
+        for r in records:
+            if r.outbox_id == outbox_id:
+                return {
+                    "outbox_id": r.outbox_id,
+                    "destination": r.destination,
+                    "attempts": r.attempts,
+                    "last_error": r.last_error,
+                    "failed_at": r.failed_at.isoformat(),
+                    "message": _message_to_full_dict(r.message),
+                }
+        return {"error": "dead letter not found"}
+    
+    if cmd == "dead_letters_requeue":
+        outbox_id = args.get("outbox_id")
+        records = await _daemon_exchange._outbox.list_dead_letters(limit=10000)
+        for r in records:
+            if r.outbox_id == outbox_id:
+                await _daemon_exchange.enqueue_outbound(r.destination, r.message)
+                return {"ok": True, "outbox_id": outbox_id, "action": "requeued"}
+        return {"error": "dead letter not found"}
     
     if cmd == "send":
         to = args.get("to", "default")
@@ -226,6 +309,10 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
             ],
         }
     
+    if cmd == "cleanup":
+        deleted = await _daemon_exchange.run_cleanup_once()
+        return {"ok": True, "deleted_count": deleted}
+    
     if cmd == "ping":
         return {"pong": True, "timestamp": time.time()}
     
@@ -238,10 +325,56 @@ def _message_to_dict(msg: Any) -> dict:
         "id": msg.id,
         "session_id": msg.session_id,
         "from_instance": msg.from_instance,
-        "text": msg.text,
+        "text": msg.text[:100] if msg.text else None,
         "sender": {"platform_id": msg.sender.platform_id, "name": msg.sender.name},
         "group_id": msg.group_id,
         "thread_id": msg.thread_id,
+        "has_media": len(msg.media) > 0 if msg.media else False,
+        "has_interactive": msg.interactive is not None,
+    }
+
+
+def _message_to_full_dict(msg: Any) -> dict:
+    """Convert full message to dict for JSON serialization."""
+    return {
+        "id": msg.id,
+        "platform_id": msg.platform_id,
+        "session_id": msg.session_id,
+        "from_instance": msg.from_instance,
+        "to": msg.to,
+        "sender": {
+            "platform_id": msg.sender.platform_id,
+            "name": msg.sender.name,
+            "handle": msg.sender.handle,
+            "is_bot": msg.sender.is_bot,
+        },
+        "ts": msg.ts.isoformat() if msg.ts else None,
+        "text": msg.text,
+        "group_id": msg.group_id,
+        "thread_id": msg.thread_id,
+        "receiver_id": msg.receiver_id,
+        "bot_mentioned": msg.bot_mentioned,
+        "media": [
+            {
+                "media_id": m.media_id,
+                "type": m.type.value if hasattr(m.type, 'value') else str(m.type),
+                "mime_type": m.mime_type,
+                "filename": m.filename,
+            }
+            for m in (msg.media or [])
+        ],
+        "interactive": {
+            "interaction_id": msg.interactive.interaction_id,
+            "type": msg.interactive.type,
+            "prompt": msg.interactive.prompt,
+            "options": msg.interactive.options,
+        } if msg.interactive else None,
+        "actions": [{"type": a.type} for a in (msg.actions or [])],
+        "reply_to_id": msg.reply_to_id,
+        "edit_of_id": msg.edit_of_id,
+        "deleted_id": msg.deleted_id,
+        "metadata": msg.metadata,
+        "raw": msg.raw if len(str(msg.raw)) < 2000 else {"truncated": True},
     }
 
 
@@ -251,9 +384,13 @@ _start_time: float = 0
 
 
 async def _daemon_async(exchange: Exchange, socket_path: Path, shutdown_event: threading.Event) -> None:
+    """Run daemon async main loop."""
     global _daemon_exchange, _start_time
     _daemon_exchange = exchange
     _start_time = time.time()
+    
+    # Start cleanup task
+    await exchange.start_cleanup_task()
     
     if socket_path.exists():
         socket_path.unlink()
@@ -268,123 +405,518 @@ async def _daemon_async(exchange: Exchange, socket_path: Path, shutdown_event: t
     socket_path.unlink(missing_ok=True)
 
 
-def _get_daemon_exchange() -> tuple[Exchange, threading.Event]:
+def _get_daemon_exchange(
+    storage_backend: str = "memory",
+    storage_path: str | None = None,
+    retention_days: int = 7,
+) -> tuple[Exchange, threading.Event]:
+    """Get or create daemon exchange instance."""
     global _daemon_exchange, _daemon_shutdown
     if _daemon_exchange is None:
-        _daemon_exchange = build_exchange()
+        _daemon_exchange = build_exchange(
+            storage_backend=storage_backend,
+            storage_path=storage_path,
+            retention_days=retention_days,
+        )
         _daemon_shutdown = threading.Event()
     return _daemon_exchange, _daemon_shutdown
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        prog="unigate", 
-        description="Universal messaging exchange CLI",
+        prog="unigate",
+        description="Universal messaging exchange - route messages between channels",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  unigate status                    Show daemon status
-  unigate start                    Start daemon in background
-  unigate start -f                 Start daemon in foreground
-  unigate stop                     Stop daemon
-  unigate instances list           List all instances
-  unigate instances status         Show instance details
-  unigate inbox list               List inbox messages
-  unigate inbox show <id>          Show message details
-  unigate inbox replay <id>        Replay a message
-  unigate outbox list              List pending messages
-  unigate outbox show <id>         Show outbox record
-  unigate outbox retry             Retry failed messages
-  unigate outbox fail <id>         Mark message as failed
-  unigate dead-letters             List dead letters
-  unigate send --to my_bot --text "Hello"
-  unigate logs                     Show recent events
-  unigate health                   Check instance health
+  # Start daemon
+  unigate start
+  unigate start --backend sqlite
+  unigate start -f
+
+  # Check status
+  unigate status
+  unigate health
+
+  # Manage instances
+  unigate instances list
+  unigate instances status
+
+  # View messages
+  unigate inbox list
+  unigate inbox show <message_id>
+  unigate inbox replay <message_id>
+  unigate inbox --instance my_bot list
+
+  # Manage outbox
+  unigate outbox list
+  unigate outbox show <outbox_id>
+  unigate outbox retry
+  unigate outbox fail <outbox_id>
+
+  # Dead letters
+  unigate dead-letters
+  unigate dead-letters show <outbox_id>
+  unigate dead-letters requeue <outbox_id>
+
+  # Send test message
+  unigate send --to my_bot --text "Hello world"
+
+  # Cleanup
+  unigate cleanup
+
+  # Plugin management
+  unigate plugins list
+  unigate plugins status
+  unigate plugins enable telegram
+  unigate plugins gen-config --output unigate.yaml
         """
     )
-    parser.add_argument("--config", help="Path to config file")
+    parser.add_argument(
+        "--config",
+        help="Path to configuration file (YAML)",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["memory", "sqlite", "file"],
+        default="memory",
+        help="Storage backend to use (default: memory)",
+    )
+    parser.add_argument(
+        "--storage-path",
+        help="Path for storage (SQLite db file or FileStores base directory). Default: ~/.unigate/",
+    )
+    parser.add_argument(
+        "--retention",
+        type=int,
+        default=7,
+        help="Days to retain sent messages before cleanup (default: 7)",
+    )
     
     sub = parser.add_subparsers(dest="command", required=True)
     
-    # Status
-    sub.add_parser("status", help="Show daemon status")
+    # Status command
+    status_parser = sub.add_parser(
+        "status",
+        help="Show daemon status and uptime",
+        description="Show current daemon status, uptime, and instance count",
+    )
     
-    # Start/Stop
-    start = sub.add_parser("start", help="Start daemon in background")
-    start.add_argument("--foreground", "-f", action="store_true", help="Run in foreground")
+    # Health command
+    health_parser = sub.add_parser(
+        "health",
+        help="Check health of all instances",
+        description="Check the health status of all registered instances",
+    )
     
-    sub.add_parser("stop", help="Stop daemon")
+    # Start command
+    start_parser = sub.add_parser(
+        "start",
+        help="Start daemon in background",
+        description="Start the unigate daemon in background mode. Creates a PID file.",
+    )
+    start_parser.add_argument(
+        "--foreground", "-f",
+        action="store_true",
+        help="Run in foreground instead of background",
+    )
+    start_parser.add_argument(
+        "--backend",
+        choices=["memory", "sqlite", "file"],
+        default="memory",
+        help="Storage backend to use (default: memory)",
+    )
+    start_parser.add_argument(
+        "--storage-path",
+        help="Path for storage (SQLite db file or FileStores base directory)",
+    )
+    start_parser.add_argument(
+        "--retention",
+        type=int,
+        default=7,
+        help="Days to retain sent messages before cleanup (default: 7)",
+    )
     
-    # Health
-    sub.add_parser("health", help="Check health of all instances")
+    # Stop command
+    stop_parser = sub.add_parser(
+        "stop",
+        help="Stop running daemon",
+        description="Stop the background daemon. Sends shutdown signal and cleans up.",
+    )
     
-    # Instances
-    inst = sub.add_parser("instances", help="Instance operations")
-    inst_sub = inst.add_subparsers(dest="subcommand", required=True)
-    inst_sub.add_parser("list", help="List all instances")
-    inst_sub.add_parser("status", help="Show detailed instance status")
+    # Cleanup command
+    cleanup_parser = sub.add_parser(
+        "cleanup",
+        help="Run cleanup of old data",
+        description="Run cleanup to delete old sent messages and dedup keys. Works with or without daemon.",
+    )
+    cleanup_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deleted without actually deleting",
+    )
     
-    # Inbox
-    inbox = sub.add_parser("inbox", help="Inbox operations")
-    inbox_sub = inbox.add_subparsers(dest="subcommand", required=True)
-    inbox_sub.add_parser("list", help="List inbox messages")
-    inbox_show = inbox_sub.add_parser("show", help="Show message details")
-    inbox_show.add_argument("message_id", help="Message ID to show")
-    inbox_replay = inbox_sub.add_parser("replay", help="Replay a message")
-    inbox_replay.add_argument("message_id", help="Message ID to replay")
+    # Logs command
+    logs_parser = sub.add_parser(
+        "logs",
+        help="Show recent events",
+        description="Show recent kernel events for debugging",
+    )
+    logs_parser.add_argument(
+        "--limit", "-n",
+        type=int,
+        default=100,
+        help="Number of events to show (default: 100)",
+    )
+    logs_parser.add_argument(
+        "--type", "-t",
+        dest="event_type",
+        help="Filter by event name prefix (e.g., 'outbox.', 'health.')",
+    )
     
-    # Outbox
-    outbox = sub.add_parser("outbox", help="Outbox operations")
-    outbox_sub = outbox.add_subparsers(dest="subcommand", required=True)
-    outbox_sub.add_parser("list", help="List pending messages")
-    outbox_show = outbox_sub.add_parser("show", help="Show outbox record")
-    outbox_show.add_argument("outbox_id", help="Outbox ID to show")
-    outbox_sub.add_parser("retry", help="Retry failed messages")
-    outbox_fail = outbox_sub.add_parser("fail", help="Mark message as failed")
-    outbox_fail.add_argument("outbox_id", help="Outbox ID to fail")
+    # Instances command
+    inst_parser = sub.add_parser(
+        "instances",
+        help="Instance management",
+        description="Manage messaging channel instances",
+    )
+    inst_sub = inst_parser.add_subparsers(dest="subcommand", required=True)
     
-    # Dead letters
-    dead = sub.add_parser("dead-letters", help="View dead letters")
-    dead.add_argument("--limit", "-n", type=int, default=50, help="Number of records to show")
+    inst_list = inst_sub.add_parser(
+        "list",
+        help="List all instances",
+        description="List all registered channel instances with their states",
+    )
+    inst_list.add_argument(
+        "--state",
+        choices=["active", "degraded", "unconfigured", "setup_required"],
+        help="Filter by instance state",
+    )
     
-    # Send
-    send = sub.add_parser("send", help="Send a test message")
-    send.add_argument("--to", default="default", help="Destination instance")
-    send.add_argument("--text", required=True, help="Message text")
-    send.add_argument("--session", help="Session ID")
+    inst_status = inst_sub.add_parser(
+        "status",
+        help="Show instance details",
+        description="Show detailed status of all instances including retry policy and errors",
+    )
+    inst_status.add_argument(
+        "instance_id",
+        nargs="?",
+        help="Specific instance to show (optional, shows all if omitted)",
+    )
     
-    # Logs
-    logs = sub.add_parser("logs", help="Show recent events")
-    logs.add_argument("--limit", "-n", type=int, default=100, help="Number of events to show")
+    inst_enable = inst_sub.add_parser(
+        "enable",
+        help="Enable an instance",
+        description="Enable a disabled instance",
+    )
+    inst_enable.add_argument("instance_id", help="Instance name to enable")
     
-    # Plugins
-    plug = sub.add_parser("plugins", help="Plugin management")
-    plug_sub = plug.add_subparsers(dest="subcommand", required=True)
+    inst_disable = inst_sub.add_parser(
+        "disable",
+        help="Disable an instance",
+        description="Disable an instance (stops processing)",
+    )
+    inst_disable.add_argument("instance_id", help="Instance name to disable")
     
-    plug_list = plug_sub.add_parser("list", help="List all available plugins")
-    plug_list.add_argument("--type", "-t", choices=["channel", "match", "transform", "transport"], help="Filter by type")
-    plug_list.add_argument("--enabled", "-e", action="store_true", help="Show only enabled")
-    plug_list.add_argument("--disabled", "-d", action="store_true", help="Show only disabled")
+    # Inbox command
+    inbox_parser = sub.add_parser(
+        "inbox",
+        help="Inbox message operations",
+        description="View and manage received messages in the inbox",
+    )
+    inbox_sub = inbox_parser.add_subparsers(dest="subcommand", required=True)
     
-    plug_status = plug_sub.add_parser("status", help="Show plugin status details")
-    plug_status.add_argument("plugin", nargs="?", help="Plugin name to check")
+    inbox_list = inbox_sub.add_parser(
+        "list",
+        help="List inbox messages",
+        description="List messages received by the exchange",
+    )
+    inbox_list.add_argument(
+        "--limit", "-n",
+        type=int,
+        default=50,
+        help="Maximum messages to show (default: 50)",
+    )
+    inbox_list.add_argument(
+        "--instance", "-i",
+        dest="instance",
+        help="Filter by instance name",
+    )
+    inbox_list.add_argument(
+        "--since",
+        help="Show messages received since timestamp (ISO format)",
+    )
     
-    plug_enable = plug_sub.add_parser("enable", help="Enable a plugin")
+    inbox_show = inbox_sub.add_parser(
+        "show",
+        help="Show message details",
+        description="Show full details of a specific message",
+    )
+    inbox_show.add_argument(
+        "message_id",
+        help="Message ID to display",
+    )
+    inbox_show.add_argument(
+        "--full",
+        action="store_true",
+        help="Show full message including raw payload",
+    )
+    
+    inbox_replay = inbox_sub.add_parser(
+        "replay",
+        help="Replay a message",
+        description="Re-process a message through the exchange (for debugging)",
+    )
+    inbox_replay.add_argument(
+        "message_id",
+        help="Message ID to replay",
+    )
+    
+    inbox_skip = inbox_sub.add_parser(
+        "skip",
+        help="Skip a message",
+        description="Mark a message as skipped (emits skip event without processing)",
+    )
+    inbox_skip.add_argument(
+        "message_id",
+        help="Message ID to skip",
+    )
+    
+    # Outbox command
+    outbox_parser = sub.add_parser(
+        "outbox",
+        help="Outbox message operations",
+        description="View and manage pending outbound messages",
+    )
+    outbox_sub = outbox_parser.add_subparsers(dest="subcommand", required=True)
+    
+    outbox_list = outbox_sub.add_parser(
+        "list",
+        help="List outbox messages",
+        description="List pending and failed outbound messages",
+    )
+    outbox_list.add_argument(
+        "--limit", "-n",
+        type=int,
+        default=50,
+        help="Maximum messages to show (default: 50)",
+    )
+    outbox_list.add_argument(
+        "--instance", "-i",
+        dest="instance",
+        help="Filter by destination instance",
+    )
+    outbox_list.add_argument(
+        "--status", "-s",
+        choices=["pending", "retry", "sent", "failed"],
+        help="Filter by message status",
+    )
+    
+    outbox_show = outbox_sub.add_parser(
+        "show",
+        help="Show outbox record",
+        description="Show full details of an outbox record",
+    )
+    outbox_show.add_argument(
+        "outbox_id",
+        help="Outbox ID to display",
+    )
+    outbox_show.add_argument(
+        "--full",
+        action="store_true",
+        help="Show full message content",
+    )
+    
+    outbox_retry = outbox_sub.add_parser(
+        "retry",
+        help="Retry failed messages",
+        description="Retry all pending/failed outbox messages",
+    )
+    outbox_retry.add_argument(
+        "--instance",
+        help="Retry only messages for specific instance",
+    )
+    
+    outbox_fail = outbox_sub.add_parser(
+        "fail",
+        help="Mark message as failed",
+        description="Manually mark a message as failed (moves to dead letters)",
+    )
+    outbox_fail.add_argument(
+        "outbox_id",
+        help="Outbox ID to mark as failed",
+    )
+    
+    outbox_skip = outbox_sub.add_parser(
+        "skip",
+        help="Skip a message (mark as sent)",
+        description="Mark a message as sent without actually sending (use with caution)",
+    )
+    outbox_skip.add_argument(
+        "outbox_id",
+        help="Outbox ID to skip",
+    )
+    
+    # Dead letters command
+    dead_parser = sub.add_parser(
+        "dead-letters",
+        help="Dead letter queue operations",
+        description="View and manage messages that failed permanently",
+    )
+    dead_sub = dead_parser.add_subparsers(dest="subcommand", required=True)
+    
+    dead_list = dead_sub.add_parser(
+        "list",
+        help="List dead letters",
+        description="List messages in the dead letter queue",
+    )
+    dead_list.add_argument(
+        "--limit", "-n",
+        type=int,
+        default=50,
+        help="Maximum records to show (default: 50)",
+    )
+    dead_list.add_argument(
+        "--instance",
+        help="Filter by destination instance",
+    )
+    
+    dead_show = dead_sub.add_parser(
+        "show",
+        help="Show dead letter details",
+        description="Show full details of a dead letter record",
+    )
+    dead_show.add_argument(
+        "outbox_id",
+        help="Dead letter outbox ID to display",
+    )
+    
+    dead_requeue = dead_sub.add_parser(
+        "requeue",
+        help="Requeue a dead letter",
+        description="Re-queue a dead letter message for delivery",
+    )
+    dead_requeue.add_argument(
+        "outbox_id",
+        help="Dead letter outbox ID to requeue",
+    )
+    
+    dead_purge = dead_sub.add_parser(
+        "purge",
+        help="Purge dead letters",
+        description="Delete all dead letter records (use with caution)",
+    )
+    dead_purge.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Confirm purge operation",
+    )
+    
+    # Send command
+    send_parser = sub.add_parser(
+        "send",
+        help="Send a test message",
+        description="Send a test message to an instance via the outbox",
+    )
+    send_parser.add_argument(
+        "--to", "-t",
+        required=True,
+        help="Destination instance name",
+    )
+    send_parser.add_argument(
+        "--text",
+        required=True,
+        help="Message text to send",
+    )
+    send_parser.add_argument(
+        "--session",
+        help="Session ID (auto-generated if not provided)",
+    )
+    send_parser.add_argument(
+        "--group",
+        help="Group ID for group messages",
+    )
+    
+    # Plugins command
+    plug_parser = sub.add_parser(
+        "plugins",
+        help="Plugin management",
+        description="Manage channel, matcher, transform, and transport plugins",
+    )
+    plug_sub = plug_parser.add_subparsers(dest="subcommand", required=True)
+    
+    plug_list = plug_sub.add_parser(
+        "list",
+        help="List all plugins",
+        description="List all available plugins by type",
+    )
+    plug_list.add_argument(
+        "--type", "-t",
+        choices=["channel", "match", "transform", "transport"],
+        help="Filter by plugin type",
+    )
+    plug_list.add_argument(
+        "--enabled", "-e",
+        action="store_true",
+        help="Show only enabled plugins",
+    )
+    plug_list.add_argument(
+        "--disabled", "-d",
+        action="store_true",
+        help="Show only disabled plugins",
+    )
+    
+    plug_status = plug_sub.add_parser(
+        "status",
+        help="Show plugin status",
+        description="Show detailed status of plugins",
+    )
+    plug_status.add_argument(
+        "plugin",
+        nargs="?",
+        help="Specific plugin to check (shows summary if omitted)",
+    )
+    
+    plug_enable = plug_sub.add_parser(
+        "enable",
+        help="Enable a plugin",
+        description="Enable a disabled plugin",
+    )
     plug_enable.add_argument("plugin", help="Plugin name to enable")
     
-    plug_disable = plug_sub.add_parser("disable", help="Disable a plugin")
+    plug_disable = plug_sub.add_parser(
+        "disable",
+        help="Disable a plugin",
+        description="Disable an enabled plugin",
+    )
     plug_disable.add_argument("plugin", help="Plugin name to disable")
     
-    plug_gen = plug_sub.add_parser("gen-config", help="Generate config template from plugins")
-    plug_gen.add_argument("--output", "-o", help="Output file path")
+    plug_gen = plug_sub.add_parser(
+        "gen-config",
+        help="Generate config template",
+        description="Generate a configuration file template from available plugins",
+    )
+    plug_gen.add_argument(
+        "--output", "-o",
+        help="Output file path (prints to stdout if not specified)",
+    )
     
-    plug_validate = plug_sub.add_parser("validate", help="Validate plugins in config")
-    plug_validate.add_argument("--config", "-c", help="Config file to validate")
+    plug_validate = plug_sub.add_parser(
+        "validate",
+        help="Validate configuration",
+        description="Validate a configuration file against available plugins",
+    )
+    plug_validate.add_argument(
+        "--config", "-c",
+        required=True,
+        help="Configuration file to validate",
+    )
     
     args = parser.parse_args(list(argv) if argv is not None else None)
     socket_path, pid_path = get_daemon_paths()
     
-    # Handle daemon commands
+    # Handle commands
     if args.command == "start":
         if socket_path.exists():
             print("daemon already running", file=sys.stderr)
@@ -392,22 +924,36 @@ Examples:
         
         socket_path.parent.mkdir(parents=True, exist_ok=True)
         
+        # Use storage path from args or global option
+        storage_path = getattr(args, 'storage_path', None) or getattr(args, 'storage_path', None)
+        retention = getattr(args, 'retention', 7)
+        
         if args.foreground:
-            exchange, shutdown = _get_daemon_exchange()
+            exchange, shutdown = _get_daemon_exchange(
+                storage_backend=args.backend,
+                storage_path=storage_path,
+                retention_days=retention,
+            )
             print("Starting daemon in foreground... (Ctrl+C to stop)")
+            print(f"  Backend: {args.backend}")
+            if storage_path:
+                print(f"  Path: {storage_path}")
+            print(f"  Retention: {retention} days")
             try:
                 asyncio.run(_daemon_async(exchange, socket_path, shutdown))
             except KeyboardInterrupt:
                 shutdown.set()
             return 0
         
-        import multiprocessing
-        exchange, shutdown = _get_daemon_exchange()
+        exchange, shutdown = _get_daemon_exchange(
+            storage_backend=args.backend,
+            storage_path=storage_path,
+            retention_days=retention,
+        )
         
         def run_daemon():
             asyncio.run(_daemon_async(exchange, socket_path, shutdown))
         
-        ctx = multiprocessing.get_context("spawn")
         proc = ctx.Process(target=run_daemon, daemon=True)
         proc.start()
         
@@ -416,7 +962,12 @@ Examples:
         
         time.sleep(0.5)
         if proc.is_alive():
-            print(f"Daemon started (PID: {proc.pid})")
+            info = f"Daemon started (PID: {proc.pid})"
+            info += f", backend: {args.backend}"
+            if storage_path:
+                info += f", path: {storage_path}"
+            info += f", retention: {retention}d"
+            print(info)
             return 0
         else:
             print("Failed to start daemon", file=sys.stderr)
@@ -446,8 +997,11 @@ Examples:
             response = send_daemon_command({"command": "status"})
             print(json.dumps(response, indent=2))
         else:
-            exchange = build_exchange()
-            print(json.dumps({"instances": list(exchange.instances.keys())}, indent=2))
+            exchange = build_exchange(storage_backend=args.backend)
+            print(json.dumps({
+                "daemon": "not running",
+                "instances": list(exchange.instances.keys()),
+            }, indent=2))
         return 0
     
     if args.command == "health":
@@ -468,6 +1022,16 @@ Examples:
             return 1
         return 0
     
+    if args.command == "cleanup":
+        if socket_path.exists():
+            response = send_daemon_command({"command": "cleanup"})
+            print(json.dumps(response, indent=2))
+        else:
+            exchange = build_exchange(storage_backend=args.backend)
+            deleted = asyncio.run(exchange.run_cleanup_once())
+            print(json.dumps({"ok": True, "deleted_count": deleted, "daemon": "standalone"}, indent=2))
+        return 0
+    
     if args.command == "send":
         if socket_path.exists():
             response = send_daemon_command({
@@ -485,37 +1049,58 @@ Examples:
         return 0
     
     if args.command == "dead-letters":
-        if socket_path.exists():
-            response = send_daemon_command({"command": "dead_letters", "args": {"limit": args.limit}})
-            print(json.dumps(response, indent=2))
-        else:
+        if not socket_path.exists():
             print("daemon not running", file=sys.stderr)
             return 1
+        
+        if args.subcommand == "list":
+            response = send_daemon_command({"command": "dead_letters", "args": {"limit": args.limit}})
+            print(json.dumps(response, indent=2))
+        elif args.subcommand == "show":
+            response = send_daemon_command({"command": "dead_letters_show", "args": {"outbox_id": args.outbox_id}})
+            print(json.dumps(response, indent=2))
+        elif args.subcommand == "requeue":
+            response = send_daemon_command({"command": "dead_letters_requeue", "args": {"outbox_id": args.outbox_id}})
+            print(json.dumps(response, indent=2))
+        elif args.subcommand == "purge":
+            if not args.confirm:
+                print("Use --confirm to actually purge dead letters", file=sys.stderr)
+                return 1
+            response = send_daemon_command({"command": "dead_letters_purge"})
+            print(json.dumps(response, indent=2))
         return 0
     
     # Commands that work with or without daemon
-    local_exchange = build_exchange()
-    
     if args.command == "instances":
         if socket_path.exists():
             response = send_daemon_command({"command": "instances"})
             print(json.dumps(response, indent=2))
         else:
-            response = local_exchange.instance_manager.status()
+            exchange = build_exchange(storage_backend=args.backend)
+            response = exchange.instance_manager.status()
             print(json.dumps(response, indent=2))
         return 0
     
     if args.command == "inbox":
         if socket_path.exists():
             if args.subcommand == "list":
-                response = send_daemon_command({"command": "inbox_list"})
+                response = send_daemon_command({"command": "inbox_list", "args": {
+                    "limit": args.limit,
+                    "instance": args.instance,
+                }})
+                print(json.dumps(response, indent=2))
             elif args.subcommand == "show":
                 response = send_daemon_command({"command": "inbox_show", "args": {"message_id": args.message_id}})
+                print(json.dumps(response, indent=2))
             elif args.subcommand == "replay":
                 response = send_daemon_command({"command": "inbox_replay", "args": {"message_id": args.message_id}})
+                print(json.dumps(response, indent=2))
+            elif args.subcommand == "skip":
+                response = send_daemon_command({"command": "inbox_skip", "args": {"message_id": args.message_id}})
+                print(json.dumps(response, indent=2))
             else:
-                response = {"error": "unknown subcommand"}
-            print(json.dumps(response, indent=2))
+                print(f"Unknown subcommand: {args.subcommand}", file=sys.stderr)
+                return 1
         else:
             print("daemon not running - inbox operations require daemon", file=sys.stderr)
             return 1
@@ -524,16 +1109,27 @@ Examples:
     if args.command == "outbox":
         if socket_path.exists():
             if args.subcommand == "list":
-                response = send_daemon_command({"command": "outbox_list"})
+                response = send_daemon_command({"command": "outbox_list", "args": {
+                    "limit": args.limit,
+                    "instance": args.instance,
+                    "status": args.status,
+                }})
+                print(json.dumps(response, indent=2))
             elif args.subcommand == "show":
                 response = send_daemon_command({"command": "outbox_show", "args": {"outbox_id": args.outbox_id}})
+                print(json.dumps(response, indent=2))
             elif args.subcommand == "retry":
                 response = send_daemon_command({"command": "outbox_retry"})
+                print(json.dumps(response, indent=2))
             elif args.subcommand == "fail":
                 response = send_daemon_command({"command": "outbox_fail", "args": {"outbox_id": args.outbox_id}})
+                print(json.dumps(response, indent=2))
+            elif args.subcommand == "skip":
+                response = send_daemon_command({"command": "outbox_skip", "args": {"outbox_id": args.outbox_id}})
+                print(json.dumps(response, indent=2))
             else:
-                response = {"error": "unknown subcommand"}
-            print(json.dumps(response, indent=2))
+                print(f"Unknown subcommand: {args.subcommand}", file=sys.stderr)
+                return 1
         else:
             print("daemon not running - outbox operations require daemon", file=sys.stderr)
             return 1

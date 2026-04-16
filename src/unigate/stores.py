@@ -758,6 +758,19 @@ class FileStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionS
     - Natural backup with rsync/copy
     - No database locks or corruption risk
     
+    JSON files contain rich metadata for easy inspection:
+    {
+      "type": "inbox",
+      "instance": "telegram_main",
+      "message_id": "msg123",
+      "sender": {"id": "user456", "name": "John"},
+      "received_at": "2024-01-01T12:00:00Z",
+      "text": "Hello",
+      "has_media": false,
+      "metadata": {...},
+      "raw": {...}  // full platform payload
+    }
+    
     Cleanup:
     - Delivered messages auto-deleted (configurable retention_days)
     - Dead letters kept for inspection
@@ -769,8 +782,10 @@ class FileStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionS
         base_path: str = "./unigate_data",
         retention_days: int = 7,
         cleanup_interval_seconds: int = 3600,
+        namespace: str = "default",
     ) -> None:
         self.base_path = Path(base_path)
+        self.namespace = namespace
         self.retention_days = retention_days
         self.cleanup_interval = cleanup_interval_seconds
         self._last_cleanup = datetime.now()
@@ -806,7 +821,8 @@ class FileStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionS
             try:
                 data = json.loads(f.read_text())
                 record = self._record_from_dict(data)
-                self._outbox[record.outbox_id] = record
+                if record:
+                    self._outbox[record.outbox_id] = record
             except Exception:
                 pass
         
@@ -827,47 +843,56 @@ class FileStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionS
                 pass
     
     def _filename(self, base_path: Path, prefix: str, id: str, ts: datetime) -> Path:
-        """Generate filename: {timestamp}_{prefix}_{id}.json"""
+        """Generate filename: {timestamp}_{namespace}_{type}_{id}.json
+        
+        Example: 20240101_120000_000000_telegram_inbox_msg123.json
+        """
         timestamp = ts.strftime("%Y%m%d_%H%M%S_%f")
         safe_id = id.replace("/", "_").replace("\\", "_")
-        return base_path / f"{timestamp}_{prefix}_{safe_id}.json"
+        safe_namespace = self.namespace.replace("/", "_").replace("\\", "_")
+        return base_path / f"{timestamp}_{safe_namespace}_{prefix}_{safe_id}.json"
     
     def _record_to_dict(self, record: Any) -> dict:
-        """Convert record to dict for JSON serialization."""
+        """Convert record to dict for JSON serialization with rich metadata."""
         if isinstance(record, OutboxRecord):
             return {
                 "type": "outbox",
+                "namespace": self.namespace,
                 "outbox_id": record.outbox_id,
                 "instance_id": record.instance_id,
                 "destination": record.destination,
-                "message": _message_to_json(record.message),
                 "status": record.status,
                 "attempts": record.attempts,
                 "next_attempt_at": record.next_attempt_at.isoformat() if record.next_attempt_at else None,
                 "last_error": record.last_error,
+                "created_at": datetime.now().isoformat(),
+                "message": self._message_to_file(record.message),
             }
         elif isinstance(record, DeadLetterRecord):
             return {
                 "type": "dead_letter",
+                "namespace": self.namespace,
                 "outbox_id": record.outbox_id,
                 "instance_id": record.instance_id,
                 "destination": record.destination,
-                "message": _message_to_json(record.message),
                 "attempts": record.attempts,
                 "last_error": record.last_error,
                 "failed_at": record.failed_at.isoformat() if hasattr(record, 'failed_at') else None,
+                "message": self._message_to_file(record.message),
             }
         elif isinstance(record, InboxRecord):
             return {
                 "type": "inbox",
+                "namespace": self.namespace,
                 "message_id": record.message_id,
                 "instance_id": record.instance_id,
-                "message": _message_to_json(record.message),
                 "received_at": record.received_at.isoformat() if hasattr(record, 'received_at') else None,
+                "message": self._message_to_file(record.message),
             }
         elif isinstance(record, PendingInteractionRecord):
             return {
                 "type": "interaction",
+                "namespace": self.namespace,
                 "interaction_id": record.interaction_id,
                 "session_id": record.session_id,
                 "instance_id": record.instance_id,
@@ -876,6 +901,32 @@ class FileStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionS
             }
         return {}
     
+    def _message_to_file(self, msg: Any) -> dict:
+        """Convert message to dict optimized for file storage and inspection."""
+        return {
+            "id": msg.id,
+            "platform_id": msg.platform_id,
+            "session_id": msg.session_id,
+            "from_instance": msg.from_instance,
+            "sender": {
+                "id": msg.sender.platform_id,
+                "name": msg.sender.name,
+                "handle": msg.sender.handle,
+                "is_bot": msg.sender.is_bot,
+            },
+            "ts": msg.ts.isoformat() if msg.ts else None,
+            "text": msg.text,
+            "group_id": msg.group_id,
+            "thread_id": msg.thread_id,
+            "receiver_id": msg.receiver_id,
+            "bot_mentioned": msg.bot_mentioned,
+            "has_media": len(msg.media) > 0 if msg.media else False,
+            "has_interactive": msg.interactive is not None,
+            "reply_to_id": msg.reply_to_id,
+            "metadata": msg.metadata,
+            "raw": msg.raw if len(str(msg.raw)) < 10000 else {"truncated": True, "size": len(str(msg.raw))},
+        }
+    
     def _record_from_dict(self, data: dict) -> Any:
         """Reconstruct record from dict."""
         if data.get("type") == "outbox":
@@ -883,7 +934,7 @@ class FileStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionS
                 outbox_id=data["outbox_id"],
                 instance_id=data["instance_id"],
                 destination=data["destination"],
-                message=_message_from_json(data["message"]),
+                message=self._message_from_file(data["message"]),
                 status=data["status"],
                 attempts=data["attempts"],
                 next_attempt_at=datetime.fromisoformat(data["next_attempt_at"]) if data.get("next_attempt_at") else None,
@@ -894,7 +945,7 @@ class FileStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionS
                 outbox_id=data["outbox_id"],
                 instance_id=data["instance_id"],
                 destination=data["destination"],
-                message=_message_from_json(data["message"]),
+                message=self._message_from_file(data["message"]),
                 attempts=data["attempts"],
                 last_error=data["last_error"],
                 failed_at=datetime.fromisoformat(data["failed_at"]) if data.get("failed_at") else datetime.now(),
@@ -903,7 +954,7 @@ class FileStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionS
             return InboxRecord(
                 message_id=data["message_id"],
                 instance_id=data["instance_id"],
-                message=_message_from_json(data["message"]),
+                message=self._message_from_file(data["message"]),
                 received_at=datetime.fromisoformat(data["received_at"]) if data.get("received_at") else datetime.now(),
             )
         elif data.get("type") == "interaction":
@@ -915,6 +966,34 @@ class FileStores(InboxStore, OutboxStore, SessionStore, DedupStore, InteractionS
                 created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(),
             )
         return None
+    
+    def _message_from_file(self, data: dict) -> Any:
+        """Reconstruct message from file storage format."""
+        from .message import Message, Sender
+        
+        sender = Sender(
+            platform_id=data.get("sender", {}).get("id", "unknown"),
+            name=data.get("sender", {}).get("name", "Unknown"),
+            handle=data.get("sender", {}).get("handle"),
+            is_bot=data.get("sender", {}).get("is_bot", False),
+        )
+        
+        return Message(
+            id=data.get("id", "unknown"),
+            session_id=data.get("session_id", "unknown"),
+            from_instance=data.get("from_instance", "unknown"),
+            sender=sender,
+            ts=datetime.fromisoformat(data["ts"]) if data.get("ts") else datetime.now(),
+            platform_id=data.get("platform_id"),
+            group_id=data.get("group_id"),
+            thread_id=data.get("thread_id"),
+            receiver_id=data.get("receiver_id"),
+            bot_mentioned=data.get("bot_mentioned", True),
+            text=data.get("text"),
+            reply_to_id=data.get("reply_to_id"),
+            metadata=data.get("metadata", {}),
+            raw=data.get("raw", {}),
+        )
     
     async def _maybe_cleanup(self) -> None:
         """Run cleanup if interval has passed."""

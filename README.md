@@ -272,9 +272,60 @@ unigate/
 
 ## Documentation
 
-- [Plugin Development Guide](docs/plugin-development.md)
-- [Architecture Overview](docs/architecture.md)
-- [Routing Configuration](docs/routing.md)
+- [Plugin Development Guide](docs/plugin-development.md) - Create new plugins
+- [Architecture Overview](docs/architecture.md) - System design
+- [Routing Configuration](docs/routing.md) - Routing rules reference
+- [Plugin Architecture](docs/plugin-architecture.md) - Plugin system details
+
+## Implementation Status
+
+### Core Features (from PRD)
+| Feature | Status |
+|---------|--------|
+| Message type | ✅ Implemented |
+| BaseChannel contract | ✅ Implemented |
+| Channel lifecycle | ✅ Implemented |
+| Exchange kernel | ✅ Implemented |
+| Storage (SQLite/Memory) | ✅ Implemented |
+| Deduplication | ✅ Implemented |
+| Retry policy | ✅ Implemented |
+| Circuit breaker | ✅ Implemented |
+| Health checks | ✅ Implemented |
+| Extension chain | ⚠️ Basic |
+| Session store | ✅ Implemented |
+| SecureStore | ✅ Implemented |
+
+### Channels
+| Channel | Status |
+|---------|--------|
+| Telegram | ✅ Implemented |
+| WhatsApp | ✅ Implemented |
+| Web/Webhook | ✅ Implemented |
+| WebUI | ✅ Implemented |
+| Internal | ✅ Implemented |
+| Slack | ❌ Not implemented |
+| Discord | ❌ Not implemented |
+| Email | ❌ Not implemented |
+| SMS | ❌ Not implemented |
+
+### Routing (Beyond PRD)
+| Feature | Status |
+|---------|--------|
+| Rule-based routing | ✅ Implemented |
+| YAML configuration | ✅ Implemented |
+| Multiple matchers | ✅ Implemented |
+| Transform extensions | ✅ Implemented |
+| Priority ordering | ✅ Implemented |
+
+### CLI Commands
+| Command | Status |
+|---------|--------|
+| Plugin management | ✅ Implemented |
+| Instance listing | ✅ Implemented |
+| Inbox operations | ✅ Implemented |
+| Outbox operations | ✅ Implemented |
+| Dead letter queue | ✅ Implemented |
+| Health checks | ✅ Implemented |
 
 ## License
 

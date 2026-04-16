@@ -147,11 +147,27 @@ class TelegramChannel:
         return []
 
     async def _handle_update(self, update: dict[str, Any]) -> None:
-        message = update.get("message") or update.get("edited_message")
+        update_type = update.get("update_id")
+        
+        # Handle edited messages
+        edited_message = update.get("edited_message")
+        if edited_message:
+            raw = self._normalize_telegram_message(edited_message, update)
+            raw["edit_of_id"] = str(edited_message.get("message_id", ""))
+            await self.kernel.ingest(self.instance_id, raw)
+            return
+        
+        # Handle deleted messages (callback from Telegram)
+        # Note: Telegram doesn't send explicit delete events, but we can detect
+        # message ID gaps in polling mode
+        
+        # Handle regular messages
+        message = update.get("message")
         if not message:
             callback = update.get("callback_query")
             if callback:
                 message = callback.get("message")
+        
         if message and self.kernel:
             raw = self._normalize_telegram_message(message, update)
             await self.kernel.ingest(self.instance_id, raw)
@@ -159,6 +175,10 @@ class TelegramChannel:
     def _normalize_telegram_message(self, msg: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
         chat = msg.get("chat", {})
         user = msg.get("from", {})
+        
+        # Detect if this is an edited message
+        edit_of_id = msg.get("edit_date")
+        
         return {
             "id": str(msg.get("message_id", "")),
             "session_id": str(chat.get("id", "unknown")),
@@ -176,8 +196,10 @@ class TelegramChannel:
             "receiver_id": f"bot:{self._token}",
             "bot_mentioned": True,
             "reply_to_id": str(msg.get("reply_to_message", {}).get("message_id")) if msg.get("reply_to_message") else None,
+            "edit_of_id": str(msg.get("message_id")) if edit_of_id else None,
+            "deleted_id": None,  # Telegram doesn't send explicit deletes
             "raw": msg,
-            "metadata": {"update_id": update.get("update_id")},
+            "metadata": {"update_id": update.get("update_id"), "edit_date": edit_of_id},
         }
 
     def to_message(self, raw: dict[str, Any]) -> Message:
