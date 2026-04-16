@@ -62,10 +62,21 @@ class Exchange:
         self._event_extensions: list[EventExtension] = []
         self.instance_manager = InstanceManager()
 
-    def register_instance(self, instance_id: str, channel: BaseChannel) -> None:
+    def register_instance(
+        self, 
+        instance_id: str, 
+        channel: BaseChannel,
+        fallback_instances: list[str] | None = None,
+    ) -> RegisteredInstance:
         """Register one named instance."""
-        self.instance_manager.register(instance_id, channel)
-        self.instances[instance_id] = RegisteredInstance(instance_id=instance_id, channel=channel)
+        runtime = self.instance_manager.register(
+            instance_id, 
+            channel,
+            fallback_instances=fallback_instances,
+        )
+        registered = RegisteredInstance(instance_id=instance_id, channel=channel)
+        self.instances[instance_id] = registered
+        return registered
 
     def set_retry_policy(
         self,

@@ -81,8 +81,21 @@ class Unigate:
         instance_manager = cfg.get("instances", {})
         secure_store = NamespacedSecureStore()
         from . import adapters as adapters_module
+        from .registry import get_registry, register_plugin_dirs
+        
+        # Load plugins from config directories
+        plugin_dirs = cfg.get("unigate", {}).get("plugin_dirs", [])
+        if plugin_dirs:
+            register_plugin_dirs(plugin_dirs)
+        
+        registry = get_registry()
+        
         for instance_id, instance_config in instance_manager.items():
             channel_type = instance_config.get("type", "internal")
+            
+            # Try to get channel from registry first
+            channel_cls = registry.get_channel(channel_type)
+            
             if channel_type == "internal":
                 adapter = adapters_module.InternalAdapter(
                     instance_id=instance_id,
@@ -90,14 +103,24 @@ class Unigate:
                     kernel=exchange,
                     config=instance_config,
                 )
+            elif channel_cls:
+                adapter = channel_cls(
+                    instance_id=instance_id,
+                    store=secure_store.for_instance(instance_id),
+                    kernel=exchange,
+                    config=instance_config,
+                )
             else:
+                # Fallback to fake webhook adapter for unknown types
                 adapter = adapters_module.FakeWebhookAdapter(
                     instance_id=instance_id,
                     store=secure_store.for_instance(instance_id),
                     kernel=exchange,
                     config=instance_config,
                 )
-            exchange.register_instance(instance_id, adapter)
+            
+            fallback_instances = instance_config.get("fallback", [])
+            runtime = exchange.register_instance(instance_id, adapter, fallback_instances=fallback_instances)
             retry_config = instance_config.get("retry", {})
             exchange.set_retry_policy(
                 instance_id,

@@ -21,6 +21,7 @@ class InstanceRuntime:
     max_attempts: int = 5
     retry_base_seconds: int = 2
     retry_max_seconds: int = 30
+    fallback_instances: list[str] = field(default_factory=list)
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     circuit_breaker: CircuitBreaker = field(default_factory=CircuitBreaker)
 
@@ -36,6 +37,13 @@ class InstanceRuntime:
 
     def can_execute(self) -> bool:
         return self.circuit_breaker.can_execute()
+    
+    def get_next_fallback(self, tried: set[str]) -> str | None:
+        """Get next available fallback instance."""
+        for fallback_id in self.fallback_instances:
+            if fallback_id not in tried:
+                return fallback_id
+        return None
 
 
 class InstanceManager:
@@ -50,6 +58,7 @@ class InstanceManager:
         max_attempts: int = 5,
         retry_base_seconds: int = 2,
         retry_max_seconds: int = 30,
+        fallback_instances: list[str] | None = None,
     ) -> InstanceRuntime:
         runtime = InstanceRuntime(
             instance_id=instance_id,
@@ -57,6 +66,7 @@ class InstanceManager:
             max_attempts=max_attempts,
             retry_base_seconds=retry_base_seconds,
             retry_max_seconds=retry_max_seconds,
+            fallback_instances=fallback_instances or [],
         )
         self.instances[instance_id] = runtime
         return runtime
@@ -119,6 +129,8 @@ class InstanceManager:
                 "max_attempts": runtime.max_attempts,
                 "retry_base_seconds": runtime.retry_base_seconds,
                 "retry_max_seconds": runtime.retry_max_seconds,
+                "fallback_instances": runtime.fallback_instances,
+                "circuit_breaker_state": runtime.circuit_breaker.state.value,
                 "updated_at": runtime.updated_at.isoformat(),
             }
             for key, runtime in self.instances.items()
