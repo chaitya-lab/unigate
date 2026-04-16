@@ -51,10 +51,11 @@
 - [x] **Interactive - Select options**
 - [x] **Group mentions (ignore unless @mentioned)**
 - [x] **Thread support**
-- [ ] Media send
-- [ ] Typing indicator
-- [ ] Message edit
-- [ ] Message delete
+- [x] **Media send**
+- [x] **Typing indicator**
+- [x] **Message edit**
+- [x] **Message delete**
+- [x] **Message reactions**
 
 ## Deferred (Phase 3+)
 

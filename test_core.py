@@ -8,7 +8,7 @@ import sys
 sys.path.insert(0, "H:/2026/SelfAi/dev/chaitya/unigate/src")
 
 from unigate import Exchange, Message
-from unigate.message import Interactive, Sender, InteractiveResponse
+from unigate.message import Interactive, Sender, InteractiveResponse, MediaRef, MediaType, Action, Reaction
 from unigate.stores import InMemoryStores
 from unigate.channel import BaseChannel, SendResult
 from unigate.capabilities import ChannelCapabilities
@@ -41,7 +41,6 @@ class FakeChannel(BaseChannel):
                 options=i.get("options"),
                 timeout_seconds=i.get("timeout_seconds"),
             )
-            # Handle nested response
             if i.get("response"):
                 r = i["response"]
                 interactive.response = InteractiveResponse(
@@ -49,6 +48,34 @@ class FakeChannel(BaseChannel):
                     type=r.get("type", "confirm"),
                     value=r.get("value", ""),
                 )
+        
+        media = []
+        if raw.get("media"):
+            for m in raw["media"]:
+                media.append(MediaRef(
+                    media_id=m.get("media_id", str(uuid4())),
+                    type=MediaType(m.get("type", "file")),
+                    mime_type=m.get("mime_type"),
+                    filename=m.get("filename"),
+                    full_url=m.get("full_url"),
+                ))
+        
+        reactions = []
+        if raw.get("reactions"):
+            for r in raw["reactions"]:
+                reactions.append(Reaction(
+                    emoji=r.get("emoji", ""),
+                    sender_id=r.get("sender_id", ""),
+                    ts=datetime.now(timezone.utc),
+                ))
+        
+        actions = []
+        if raw.get("actions"):
+            for a in raw["actions"]:
+                actions.append(Action(
+                    type=a.get("type", ""),
+                    payload=a.get("payload", {}),
+                ))
         
         return Message(
             id=raw.get("id", str(uuid4())),
@@ -61,6 +88,11 @@ class FakeChannel(BaseChannel):
             thread_id=raw.get("thread_id"),
             text=raw.get("text"),
             interactive=interactive,
+            media=media,
+            reactions=reactions,
+            actions=actions,
+            edit_of_id=raw.get("edit_of_id"),
+            deleted_id=raw.get("deleted_id"),
             raw=raw,
             metadata={},
         )
@@ -543,6 +575,311 @@ async def test_multiple_channels():
     return True
 
 
+async def test_media_send():
+    """Test 10: Media send."""
+    print("\n" + "="*50)
+    print("TEST 10: Media Send")
+    print("="*50)
+    
+    exchange, stores, channel = create_exchange()
+    
+    async def handler(msg: Message) -> Message:
+        received.append(msg)
+        return Message(
+            id=f"reply-{uuid4()}",
+            session_id=msg.session_id,
+            from_instance="handler",
+            sender=Sender(platform_id="handler", name="Handler"),
+            ts=datetime.now(timezone.utc),
+            text="Got your media",
+            media=[
+                MediaRef(
+                    media_id="img-001",
+                    type=MediaType.IMAGE,
+                    mime_type="image/png",
+                    filename="photo.png",
+                    full_url="https://example.com/photo.png",
+                )
+            ],
+        )
+    
+    exchange.set_handler(handler)
+    received = []
+    
+    await exchange.ingest("test", {
+        "id": "media-001",
+        "session_id": "media-session",
+        "from_instance": "test",
+        "sender": {"id": "user", "name": "User"},
+        "text": "Check this out",
+        "media": [
+            {
+                "media_id": "img-001",
+                "type": "image",
+                "mime_type": "image/png",
+                "filename": "photo.png",
+                "full_url": "https://example.com/photo.png",
+            }
+        ],
+    })
+    
+    await exchange.flush_outbox()
+    
+    print(f"  Received media count: {len(received[0].media) if received else 0}")
+    print(f"  Media type: {received[0].media[0].type if received and received[0].media else 'none'}")
+    
+    assert len(received) == 1
+    assert len(received[0].media) == 1
+    assert received[0].media[0].type == MediaType.IMAGE
+    assert received[0].media[0].filename == "photo.png"
+    
+    # Check response has media
+    sent = channel._sent[-1]
+    print(f"  Response media count: {len(sent.media)}")
+    assert len(sent.media) == 1
+    
+    print("  [PASSED]")
+    return True
+
+
+async def test_typing_indicator():
+    """Test 11: Typing indicator."""
+    print("\n" + "="*50)
+    print("TEST 11: Typing Indicator")
+    print("="*50)
+    
+    exchange, stores, channel = create_exchange()
+    
+    received = []
+    
+    async def handler(msg: Message) -> Message:
+        received.append(msg)
+        # Return typing action before responding
+        return Message(
+            id=f"reply-{uuid4()}",
+            session_id=msg.session_id,
+            from_instance="handler",
+            sender=Sender(platform_id="handler", name="Handler"),
+            ts=datetime.now(timezone.utc),
+            text="Typing...",
+            actions=[
+                Action(type="typing_start"),
+            ],
+        )
+    
+    exchange.set_handler(handler)
+    
+    await exchange.ingest("test", {
+        "id": "typing-001",
+        "session_id": "typing-session",
+        "from_instance": "test",
+        "sender": {"id": "user", "name": "User"},
+        "text": "hello",
+    })
+    
+    await exchange.flush_outbox()
+    
+    print(f"  Received actions: {len(received[0].actions) if received else 0}")
+    
+    assert len(received) == 1
+    
+    # Check actions
+    sent = channel._sent[-1]
+    print(f"  Response actions: {[a.type for a in sent.actions]}")
+    assert len(sent.actions) >= 1
+    assert sent.actions[0].type == "typing_start"
+    
+    print("  [PASSED]")
+    return True
+
+
+async def test_message_edit():
+    """Test 12: Message edit."""
+    print("\n" + "="*50)
+    print("TEST 12: Message Edit")
+    print("="*50)
+    
+    exchange, stores, channel = create_exchange()
+    
+    received = []
+    
+    async def handler(msg: Message) -> Message:
+        received.append(msg)
+        # If this message is an edit request, return edited message
+        if msg.edit_of_id:
+            return Message(
+                id=f"reply-{uuid4()}",
+                session_id=msg.session_id,
+                from_instance="handler",
+                sender=Sender(platform_id="handler", name="Handler"),
+                ts=datetime.now(timezone.utc),
+                text="Edited message",
+                edit_of_id=msg.edit_of_id,
+            )
+        # First message
+        return Message(
+            id=f"reply-{uuid4()}",
+            session_id=msg.session_id,
+            from_instance="handler",
+            sender=Sender(platform_id="handler", name="Handler"),
+            ts=datetime.now(timezone.utc),
+            text="Original message",
+        )
+    
+    exchange.set_handler(handler)
+    
+    # First message
+    await exchange.ingest("test", {
+        "id": "edit-001",
+        "session_id": "edit-session",
+        "from_instance": "test",
+        "sender": {"id": "user", "name": "User"},
+        "text": "hello",
+    })
+    await exchange.flush_outbox()
+    
+    sent_msg = channel._sent[-1]
+    original_id = sent_msg.id
+    print(f"  Original message ID: {original_id}")
+    print(f"  Original text: {sent_msg.text}")
+    
+    # Edit message - request to edit the sent message
+    await exchange.ingest("test", {
+        "id": "edit-002",
+        "session_id": "edit-session",
+        "from_instance": "test",
+        "sender": {"id": "user", "name": "User"},
+        "text": "edit my message",
+        "edit_of_id": original_id,
+    })
+    await exchange.flush_outbox()
+    
+    sent_edit = channel._sent[-1]
+    print(f"  Edit message ID: {sent_edit.id}")
+    print(f"  Edit of ID: {sent_edit.edit_of_id}")
+    print(f"  Edited text: {sent_edit.text}")
+    
+    assert sent_edit.edit_of_id == original_id
+    assert sent_edit.text == "Edited message"
+    
+    print("  [PASSED]")
+    return True
+
+
+async def test_message_delete():
+    """Test 13: Message delete."""
+    print("\n" + "="*50)
+    print("TEST 13: Message Delete")
+    print("="*50)
+    
+    exchange, stores, channel = create_exchange()
+    
+    received = []
+    
+    async def handler(msg: Message) -> Message:
+        received.append(msg)
+        if msg.deleted_id:
+            return Message(
+                id=f"reply-{uuid4()}",
+                session_id=msg.session_id,
+                from_instance="handler",
+                sender=Sender(platform_id="handler", name="Handler"),
+                ts=datetime.now(timezone.utc),
+                text="Message deleted",
+                deleted_id=msg.deleted_id,
+            )
+        return Message(
+            id=f"reply-{uuid4()}",
+            session_id=msg.session_id,
+            from_instance="handler",
+            sender=Sender(platform_id="handler", name="Handler"),
+            ts=datetime.now(timezone.utc),
+            text="Original",
+        )
+    
+    exchange.set_handler(handler)
+    
+    # First message
+    await exchange.ingest("test", {
+        "id": "delete-001",
+        "session_id": "delete-session",
+        "from_instance": "test",
+        "sender": {"id": "user", "name": "User"},
+        "text": "hello",
+    })
+    await exchange.flush_outbox()
+    
+    sent_msg = channel._sent[-1]
+    print(f"  Original message ID: {sent_msg.id}")
+    
+    # Delete message
+    await exchange.ingest("test", {
+        "id": "delete-002",
+        "session_id": "delete-session",
+        "from_instance": "test",
+        "sender": {"id": "user", "name": "User"},
+        "text": "delete it",
+        "deleted_id": sent_msg.id,
+    })
+    await exchange.flush_outbox()
+    
+    sent_delete = channel._sent[-1]
+    print(f"  Delete message ID: {sent_delete.id}")
+    print(f"  Deleted ID: {sent_delete.deleted_id}")
+    
+    assert sent_delete.deleted_id == sent_msg.id
+    
+    print("  [PASSED]")
+    return True
+
+
+async def test_reactions():
+    """Test 14: Message reactions."""
+    print("\n" + "="*50)
+    print("TEST 14: Message Reactions")
+    print("="*50)
+    
+    exchange, stores, channel = create_exchange()
+    
+    received = []
+    
+    async def handler(msg: Message) -> Message:
+        received.append(msg)
+        return Message(
+            id=f"reply-{uuid4()}",
+            session_id=msg.session_id,
+            from_instance="handler",
+            sender=Sender(platform_id="handler", name="Handler"),
+            ts=datetime.now(timezone.utc),
+            text="Got your reaction",
+        )
+    
+    exchange.set_handler(handler)
+    
+    await exchange.ingest("test", {
+        "id": "react-001",
+        "session_id": "react-session",
+        "from_instance": "test",
+        "sender": {"id": "user", "name": "User"},
+        "text": "great!",
+        "reactions": [
+            {"emoji": "👍", "sender_id": "user1"},
+            {"emoji": "❤️", "sender_id": "user2"},
+        ],
+    })
+    
+    await exchange.flush_outbox()
+    
+    print(f"  Received reactions: {len(received[0].reactions) if received else 0}")
+    print(f"  Reaction count: {len(received[0].reactions)}")
+    
+    assert len(received) == 1
+    assert len(received[0].reactions) == 2
+    
+    print("  [PASSED]")
+    return True
+
+
 async def main():
     """Run all tests."""
     print("\n" + "="*60)
@@ -559,6 +896,11 @@ async def main():
         ("Circuit Breaker", test_circuit_breaker),
         ("Session Routing", test_session_routing),
         ("Multiple Channels", test_multiple_channels),
+        ("Media Send", test_media_send),
+        ("Typing Indicator", test_typing_indicator),
+        ("Message Edit", test_message_edit),
+        ("Message Delete", test_message_delete),
+        ("Message Reactions", test_reactions),
     ]
     
     results = []
