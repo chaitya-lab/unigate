@@ -166,22 +166,53 @@ class TestCrossPlatformIdentity:
         from unigate.extensions import ExtensionDecision
         
         ext = IdentityExtension({
-            'identity_map': {
-                '+1234567890': 'alice',
+            'names': {
+                '123456789': 'Alice Smith',
+                '+1234567890': 'Bob Jones',
+            },
+            'links': {
+                'alice': ['telegram:123456789', 'whatsapp:987654321'],
             },
             'auto_detect': True,
         })
         
-        msg = Message(
+        # Test name mapping
+        msg1 = Message(
             id='1',
-            session_id='sms:+1234567890',
-            from_instance='sms',
-            sender=Sender(platform_id='+1234567890', name='Alice'),
+            session_id='telegram:123456789',
+            from_instance='telegram',
+            sender=Sender(platform_id='123456789', name='Original Name'),
             ts=datetime.now(timezone.utc),
         )
         
-        result = await ext.handle(msg)
+        result1 = await ext.handle(msg1)
+        assert result1.message.sender.name == 'Alice Smith'
+        assert result1.message.sender.canonical_id == 'alice'
         
-        # Extension should populate canonical_id
-        assert isinstance(result, ExtensionDecision)
-        assert result.message.sender.canonical_id == 'alice'
+        # Test cross-platform linking
+        msg2 = Message(
+            id='2',
+            session_id='whatsapp:987654321',
+            from_instance='whatsapp',
+            sender=Sender(platform_id='987654321', name='User'),
+            ts=datetime.now(timezone.utc),
+        )
+        
+        result2 = await ext.handle(msg2)
+        assert result2.message.sender.canonical_id == 'alice'
+        
+        # Test auto-detect phone number
+        ext2 = IdentityExtension({
+            'auto_detect': True,
+        })
+        
+        msg3 = Message(
+            id='3',
+            session_id='sms:+1234567890',
+            from_instance='sms',
+            sender=Sender(platform_id='+1234567890', name='User'),
+            ts=datetime.now(timezone.utc),
+        )
+        
+        result3 = await ext2.handle(msg3)
+        assert result3.message.sender.canonical_id == 'phone:+1234567890'

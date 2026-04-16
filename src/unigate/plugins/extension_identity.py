@@ -1,19 +1,34 @@
-"""Identity extension - links users across platforms.
+"""Identity extension - maps sender IDs to friendly names and links across platforms.
 
-This extension demonstrates how to implement cross-platform user identity.
-It's NOT enabled by default - enable it in config if you need it.
+Usage in instance config or global config:
 
-Example: SMS and WhatsApp both have phone number +1234567890.
-Without extension: Different sessions for each platform.
-With extension: Same canonical_id, can track across platforms.
+# Option 1: Per-instance identity mapping
+instances:
+  sales_bot:
+    type: telegram
+    identity:
+      # Map sender IDs to friendly names
+      names:
+        "123456789": "Alice"
+        "987654321": "Bob"
+      # Link across platforms
+      links:
+        "+1234567890": "alice"  # Phone number → canonical ID
+      auto_detect: true
 
-Usage in config:
-    extensions:
-      - name: identity
-        config:
-          identity_map:
-            "+1234567890": alice
-          auto_detect: true
+# Option 2: Global identity config
+identity:
+  names:
+    "123456789": "Alice"  # telegram:123456789 → Alice
+    "+1234567890": "Bob"  # whatsapp:+1234567890 → Bob
+  links:
+    "alice":
+      - "telegram:123456789"
+      - "whatsapp:+1234567890"
+
+In handler:
+  msg.sender.name  # Friendly name (Alice)
+  msg.sender.canonical_id  # Cross-platform ID (alice)
 """
 
 from __future__ import annotations
@@ -26,64 +41,135 @@ from ..message import Message
 
 
 class IdentityExtension:
-    """Links users across platforms using canonical_id.
+    """Maps sender IDs to friendly names and links users across platforms.
     
-    This extension populates sender.canonical_id for cross-platform identity.
-    When enabled, the same user on different platforms will have the same canonical_id.
+    Configuration options:
     
-    Configuration:
-        identity_map: dict mapping platform_id to canonical_id
-        auto_detect: bool - auto-detect by phone/email matching
+    # Simple name mapping (ID → display name)
+    identity:
+      names:
+        "123456789": "Alice"
+        "+1234567890": "Bob"
     
-    Usage:
-        # Config
-        extensions:
-          - name: identity
-        
-        # In handler:
-        if msg.sender.canonical_id == "alice":
-            # Same user on any platform
+    # Cross-platform linking (all IDs → canonical ID)
+    identity:
+      links:
+        "alice":
+          - "telegram:123456789"
+          - "whatsapp:+1234567890"
+          - "+1234567890"  # Also match by phone
+    
+    # Auto-detect identifier types
+    identity:
+      auto_detect:
+        - type: phone
+          pattern: "^[+]?[0-9]{10,}$"
+        - type: email
+          pattern: "^.+@.+\\..+$"
+    
+    Priority: 5 (runs early to populate canonical_id and name)
     """
     
     name: ClassVar[str] = "identity"
-    priority: ClassVar[int] = 5  # Runs early to populate canonical_id
+    priority: ClassVar[int] = 5
     
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         self._config = config or {}
-        self._identity_map: dict[str, str] = self._config.get("identity_map", {})
-        self._auto_detect: bool = self._config.get("auto_detect", False)
+        
+        # Name mappings: ID → display name
+        self._names: dict[str, str] = {}
+        name_config = self._config.get("names", {})
+        if isinstance(name_config, dict):
+            self._names = name_config
+        
+        # Cross-platform links: canonical ID → list of platform IDs
+        self._links: dict[str, list[str]] = {}
+        links_config = self._config.get("links", {})
+        if isinstance(links_config, dict):
+            for canonical_id, platform_ids in links_config.items():
+                if isinstance(platform_ids, list):
+                    self._links[canonical_id] = platform_ids
+        
+        # Auto-detect settings
+        self._auto_detect = self._config.get("auto_detect", True)
+        self._auto_patterns = self._config.get("auto_patterns", [
+            {"type": "phone", "pattern": r"^[+]?[0-9]{10,}$"},
+            {"type": "email", "pattern": r"^.+@.+\..+$"},
+        ])
     
     async def handle(self, msg: Message) -> ExtensionDecision:
-        """Populate canonical_id for cross-platform identity."""
-        platform_id = msg.sender.platform_id
+        """Process message to set canonical_id and friendly name."""
+        sender_id = msg.sender.platform_id
+        instance_id = msg.from_instance
         
-        # Check explicit mapping
-        if platform_id in self._identity_map:
-            canonical = self._identity_map[platform_id]
+        # Key for looking up in mappings
+        # Try: instance:sender_id, sender_id (exact), sender_id without instance prefix
+        lookup_keys = [
+            f"{instance_id}:{sender_id}",  # telegram:123456789
+            sender_id,                      # 123456789 or +1234567890
+        ]
+        
+        # 1. Set canonical_id from links
+        canonical = self._find_canonical_id(sender_id, instance_id)
+        if canonical:
             msg.sender.canonical_id = canonical
         
-        # Auto-detect by phone number patterns
-        elif self._auto_detect:
-            if self._looks_like_phone(platform_id):
-                canonical = self._normalize_phone(platform_id)
-                msg.sender.canonical_id = canonical
+        # 2. Set friendly name from names mapping
+        friendly_name = self._find_name(sender_id, instance_id)
+        if friendly_name:
+            msg.sender.name = friendly_name
+        
+        # 3. Auto-detect identifier type and set canonical_id
+        if self._auto_detect and not msg.sender.canonical_id:
+            detected = self._auto_detect_id(sender_id)
+            if detected:
+                msg.sender.canonical_id = detected
         
         return ExtensionDecision(continue_flow=True, message=msg)
     
-    async def on_event(self, event: KernelEvent) -> None:
-        """Track user identity across messages."""
-        pass
+    def _find_canonical_id(self, sender_id: str, instance_id: str) -> str | None:
+        """Find canonical ID for a sender."""
+        # Check links: sender_id → canonical_id
+        for canonical_id, platform_ids in self._links.items():
+            for pid in platform_ids:
+                if pid == sender_id or pid == f"{instance_id}:{sender_id}":
+                    return canonical_id
+        return None
     
-    @staticmethod
-    def _looks_like_phone(value: str) -> bool:
-        """Simple check if value looks like a phone number."""
-        cleaned = value.replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
-        return cleaned.isdigit() and len(cleaned) >= 10
+    def _find_name(self, sender_id: str, instance_id: str) -> str | None:
+        """Find friendly name for a sender."""
+        lookup_keys = [
+            f"{instance_id}:{sender_id}",
+            sender_id,
+        ]
+        for key in lookup_keys:
+            if key in self._names:
+                return self._names[key]
+        return None
     
-    @staticmethod
-    def _normalize_phone(phone: str) -> str:
-        """Normalize phone number for matching."""
-        return phone.replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
+    def _auto_detect_id(self, sender_id: str) -> str | None:
+        """Auto-detect identifier type and normalize."""
+        import re
+        
+        for pattern_config in self._auto_patterns:
+            pattern = pattern_config.get("pattern", "")
+            id_type = pattern_config.get("type", "unknown")
+            
+            if re.match(pattern, sender_id):
+                # Normalize and use as canonical ID
+                normalized = self._normalize_id(sender_id, id_type)
+                return f"{id_type}:{normalized}"
+        
+        return None
+    
+    def _normalize_id(self, value: str, id_type: str) -> str:
+        """Normalize identifier based on type."""
+        if id_type == "phone":
+            # Remove all non-digits except leading +
+            if value.startswith("+"):
+                return "+" + "".join(c for c in value if c.isdigit())
+            return "".join(c for c in value if c.isdigit())
+        return value
 
 
 __all__ = ["IdentityExtension"]
