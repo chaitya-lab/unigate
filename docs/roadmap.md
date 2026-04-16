@@ -70,7 +70,31 @@
 - [x] **Message delete**
 - [x] **Message reactions**
 
-## Deferred (Phase 3+)
+## Phase 3: Routing System (Next)
+
+### Routing Engine
+- [ ] Config-based routing rules
+- [ ] Priority-based rule evaluation
+- [ ] Pattern matching (glob, regex)
+- [ ] Multiple destinations per rule
+- [ ] Default instance for unmatched messages
+- [ ] Message retention policies
+- [ ] Multi-file routing config support
+
+### Transform Extensions
+- [ ] New `transform` extension type
+- [ ] Built-in transforms (truncate, extract, convert)
+- [ ] Chain multiple transforms
+- [ ] Error handling per transform
+
+### Handler Instance
+- [ ] Handler as special "handler" instance type
+- [ ] Remove fixed handler from gate.py
+- [ ] Handler destination in routing rules
+
+See [docs/routing-design.md](routing-design.md) for full design.
+
+## Deferred (Phase 4+)
 
 ### External Adapters
 - WhatsApp Cloud API
