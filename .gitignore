@@ -17,4 +17,8 @@ unigate.db
 unigate.log
 .env
 .env.*
+.env
+unigate.yaml
 sessions/
+*.sock
+*.pid
