@@ -39,6 +39,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["unigate*"]
 
 [tool.ruff]
 line-length = 100
