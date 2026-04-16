@@ -275,6 +275,7 @@ class RoutingEngine:
         self._default_instance: str | None = "default"
         self._unprocessed_retention_days: int = 7
         self._routing_enabled: bool = True
+        self._warnings: list[str] = []
         
         self._load_config(self.config)
         self._load_extensions()
@@ -285,7 +286,13 @@ class RoutingEngine:
         self._default_instance = routing.get("default_instance")
         unprocessed = routing.get("unprocessed", {})
         self._unprocessed_retention_days = unprocessed.get("retention_days", 7)
-        self._rules = load_rules_from_config(config)
+        
+        strict = routing.get("strict_mode", False)
+        self._rules, warnings = load_rules_from_config(config, strict)
+        
+        for w in warnings:
+            self._warnings.append(w)
+        
         rules_file = routing.get("rules_file")
         if rules_file:
             self._load_rules_from_file(rules_file)
@@ -451,11 +458,41 @@ class RoutingEngine:
             self.config = config
         self._load_config(self.config)
         self._load_extensions()
+    
+    def get_warnings(self) -> list[str]:
+        """Get warnings from rule loading."""
+        return self._warnings.copy()
+    
+    def validate_rules(self) -> tuple[list[RoutingRule], list[str]]:
+        """Validate current rules and return (valid_rules, warnings)."""
+        valid = []
+        warnings = []
+        
+        for rule in self._rules:
+            has_missing = False
+            if rule.actions:
+                for ext_name in rule.actions.extensions:
+                    if not self._plugin_registry.get_match(ext_name) and not self._plugin_registry.get_transform(ext_name):
+                        warnings.append(f"Rule '{rule.name}': plugin '{ext_name}' not found")
+                        has_missing = True
+            if not has_missing:
+                valid.append(rule)
+        
+        return valid, warnings
 
 
-def load_rules_from_config(config: dict[str, Any]) -> list[RoutingRule]:
+def load_rules_from_config(config: dict[str, Any], strict: bool = False) -> tuple[list[RoutingRule], list[str]]:
+    """Load routing rules from config with plugin validation.
+    
+    Returns (rules, warnings).
+    """
+    from .plugins.base import get_registry
+    
+    registry = get_registry()
     rules = []
+    warnings = []
     routing_config = config.get("routing", {})
+    
     if isinstance(routing_config, dict):
         rules_data = routing_config.get("rules", [])
     elif isinstance(routing_config, list):
@@ -466,10 +503,19 @@ def load_rules_from_config(config: dict[str, Any]) -> list[RoutingRule]:
     for rule_data in rules_data:
         if isinstance(rule_data, dict):
             rule = RoutingRule.from_dict(rule_data)
+            
+            if rule.actions:
+                for ext_name in rule.actions.extensions:
+                    if not registry.get_match(ext_name) and not registry.get_transform(ext_name):
+                        msg = f"Plugin '{ext_name}' not found for rule '{rule.name}'"
+                        if strict:
+                            raise ValueError(msg)
+                        warnings.append(msg)
+            
             rules.append(rule)
     
     rules.sort(key=lambda r: r.priority)
-    return rules
+    return rules, warnings
 
 
 __all__ = [

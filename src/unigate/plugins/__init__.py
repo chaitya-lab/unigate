@@ -2,10 +2,13 @@
 
 All plugins operate on the universal Message format.
 Plugin types: channel, match, transform, transport
+Naming: type.name (e.g., channel.telegram, match.text_contains)
 """
 
 from .base import (
     PluginRegistry,
+    PluginEntry,
+    PluginStatus,
     PluginType,
     ChannelPlugin,
     MatcherPlugin,
@@ -13,6 +16,7 @@ from .base import (
     TransportPlugin,
     get_registry,
     register_plugin_dirs,
+    resolve_type,
 )
 
 from .channel_web import WebChannelPlugin, WebChannel, APIKeyWebChannel, BearerTokenWebChannel
@@ -30,6 +34,8 @@ from .transport_http import HTTPTransport, WebhookTransport
 
 __all__ = [
     "PluginRegistry",
+    "PluginEntry",
+    "PluginStatus",
     "PluginType",
     "ChannelPlugin",
     "MatcherPlugin",
@@ -37,6 +43,7 @@ __all__ = [
     "TransportPlugin",
     "get_registry",
     "register_plugin_dirs",
+    "resolve_type",
     "WebChannelPlugin",
     "TelegramChannelPlugin",
     "TelegramChannel",

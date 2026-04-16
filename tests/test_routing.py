@@ -286,7 +286,7 @@ class TestLoadRulesFromConfig:
             },
         }
         
-        rules = load_rules_from_config(config)
+        rules, warnings = load_rules_from_config(config)
         
         assert len(rules) == 3
         assert rules[0].name == "rule2"  # priority 50
@@ -294,8 +294,9 @@ class TestLoadRulesFromConfig:
         assert rules[2].name == "rule1"  # priority 100
     
     def test_empty_rules(self):
-        rules = load_rules_from_config({})
+        rules, warnings = load_rules_from_config({})
         assert len(rules) == 0
+        assert len(warnings) == 0
 
 
 if __name__ == "__main__":

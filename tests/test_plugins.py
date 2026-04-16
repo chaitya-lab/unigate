@@ -17,33 +17,33 @@ class TestPluginRegistry:
 
     def test_registry_has_channels(self):
         registry = get_registry()
-        assert "web" in registry.channels
-        assert "telegram" in registry.channels
+        assert "channel.web" in registry.channels
+        assert "channel.telegram" in registry.channels
 
     def test_registry_has_matchers(self):
         registry = get_registry()
-        assert "from" in registry.matches
-        assert "text_contains" in registry.matches
-        assert "sender" in registry.matches
-        assert "has_media" in registry.matches
-        assert "day_of_week" in registry.matches
+        assert "match.from" in registry.matches
+        assert "match.text_contains" in registry.matches
+        assert "match.sender" in registry.matches
+        assert "match.has_media" in registry.matches
+        assert "match.day_of_week" in registry.matches
 
     def test_registry_has_transforms(self):
         registry = get_registry()
-        assert "truncate" in registry.transforms
-        assert "extract_subject" in registry.transforms
-        assert "add_metadata" in registry.transforms
+        assert "transform.truncate" in registry.transforms
+        assert "transform.extract_subject" in registry.transforms
+        assert "transform.add_metadata" in registry.transforms
 
     def test_registry_has_transports(self):
         registry = get_registry()
-        assert "http" in registry.transports
+        assert "transport.http" in registry.transports
 
     def test_create_match(self):
         registry = get_registry()
-        matcher = registry.create_match("from")
+        matcher = registry.create_match("match.from")
         assert matcher is not None
 
     def test_create_transform(self):
         registry = get_registry()
-        transform = registry.create_transform("truncate")
+        transform = registry.create_transform("transform.truncate")
         assert transform is not None

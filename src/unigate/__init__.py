@@ -31,6 +31,8 @@ from .message import (
 )
 from .plugins import (
     PluginRegistry,
+    PluginEntry,
+    PluginStatus,
     PluginType,
     ChannelPlugin,
     MatcherPlugin,
@@ -38,6 +40,7 @@ from .plugins import (
     TransportPlugin,
     get_registry,
     register_plugin_dirs,
+    resolve_type,
     TelegramChannel,
     WebChannel,
     APIKeyWebChannel,
