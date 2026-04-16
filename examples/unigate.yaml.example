@@ -1,0 +1,49 @@
+# Unigate Configuration Example
+# Copy this to unigate.yaml and fill in your values
+
+unigate:
+  mount_prefix: /unigate
+  max_concurrent_processing: 50
+
+storage:
+  backend: sqlite
+  path: ./unigate.db
+
+deduplication:
+  window_seconds: 300
+
+instances:
+  # Telegram bot example
+  my_telegram_bot:
+    type: telegram
+    token: !env:TELEGRAM_BOT_TOKEN
+    mode: polling  # or webhook (requires public URL)
+    # webhook_url: https://yourdomain.com/unigate/webhook/telegram
+    # webhook_secret: your-secret-token
+
+  # Another Telegram bot (different instance)
+  support_bot:
+    type: telegram
+    token: !env:SUPPORT_BOT_TOKEN
+    mode: polling
+
+  # Web UI for testing (no auth needed)
+  web:
+    type: webui
+
+  # Webhook with API key
+  api_channel:
+    type: web
+    auth_method: api_key
+    api_key: !env:API_KEY
+
+  # Webhook with Bearer token
+  auth_channel:
+    type: web
+    auth_method: bearer
+    bearer_token: !env:BEARER_TOKEN
+
+# Extension configuration
+extensions:
+  - name: log
+    priority: 100
