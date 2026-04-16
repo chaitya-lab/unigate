@@ -1,34 +1,47 @@
-"""unigate public package."""
+"""Public package surface for the 1.5 rewrite."""
 
-from .asgi import UnigateASGIApp, create_asgi_app
-from .channel import ChannelCapabilities, HealthStatus, SetupResult, SetupStatus
-from .channels import ApiChannel, InternalChannel, WebChannel, WebSocketServerChannel
-from .config import build_gate_from_config, load_config
-from .envelope import OutboundMessage, SenderProfile, UniversalMessage
-from .gate import Unigate
-from .interactive import InteractivePayload, InteractiveResponse, InteractionType
+from .capabilities import ChannelCapabilities
+from .channel import BaseChannel, KernelHandle, RawRequest, SecureStore
+from .events import KernelEvent
+from .kernel import Exchange, RegisteredInstance
+from .lifecycle import HealthStatus, InstanceState, SetupResult, SetupStatus
+from .message import (
+    Action,
+    FormField,
+    Interactive,
+    InteractiveResponse,
+    InteractionType,
+    MediaRef,
+    MediaType,
+    Message,
+    Reaction,
+    Sender,
+)
 
 __all__ = [
     "__version__",
+    "Action",
+    "BaseChannel",
     "ChannelCapabilities",
+    "Exchange",
+    "FormField",
     "HealthStatus",
-    "ApiChannel",
-    "InternalChannel",
-    "InteractivePayload",
+    "InstanceState",
+    "Interactive",
     "InteractiveResponse",
     "InteractionType",
-    "OutboundMessage",
-    "SenderProfile",
+    "KernelEvent",
+    "KernelHandle",
+    "MediaRef",
+    "MediaType",
+    "Message",
+    "RawRequest",
+    "Reaction",
+    "RegisteredInstance",
+    "SecureStore",
+    "Sender",
     "SetupResult",
     "SetupStatus",
-    "Unigate",
-    "UnigateASGIApp",
-    "UniversalMessage",
-    "WebChannel",
-    "WebSocketServerChannel",
-    "build_gate_from_config",
-    "create_asgi_app",
-    "load_config",
 ]
 
-__version__ = "0.1.0a0"
+__version__ = "0.2.0a0"

@@ -1,80 +1,79 @@
-"""Core channel adapter contracts."""
+"""Base adapter and kernel-facing protocols."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
-from .envelope import OutboundMessage, UniversalMessage
-
-
-class HealthStatus(str, Enum):
-    """Adapter health check outcomes."""
-
-    HEALTHY = "healthy"
-    UNHEALTHY = "unhealthy"
-    UNKNOWN = "unknown"
+from .capabilities import ChannelCapabilities
+from .events import KernelEvent
+from .lifecycle import HealthStatus, SetupResult
+from .message import Message
 
 
-class SetupStatus(str, Enum):
-    """Interactive setup phase outcomes."""
+class SecureStore(Protocol):
+    """Namespaced credential storage for one instance."""
 
-    COMPLETE = "complete"
-    REQUIRED = "required"
-    PENDING = "pending"
-    FAILED = "failed"
+    async def get(self, key: str) -> str | None: ...
+    async def set(self, key: str, value: str) -> None: ...
+    async def delete(self, key: str) -> None: ...
 
 
-@dataclass(slots=True)
-class SetupResult:
-    """Result returned by adapter setup routines."""
+class KernelHandle(Protocol):
+    """Small kernel surface exposed to adapters."""
 
-    status: SetupStatus
-    interaction_type: str | None = None
-    interaction_data: dict[str, Any] = field(default_factory=dict)
-    message: str | None = None
+    async def emit_event(self, event: KernelEvent) -> None: ...
 
 
 @dataclass(slots=True)
-class ChannelCapabilities:
-    """Declared transport capabilities used by the kernel for safe behavior."""
+class RawRequest:
+    """Generic incoming HTTP request shape for signature verification."""
 
-    supports_threads: bool = False
-    supports_groups: bool = False
-    supports_reactions: bool = False
-    supports_message_edit: bool = False
-    supports_message_delete: bool = False
-    supports_typing_indicator: bool = False
-    supports_interactive: bool = False
-    supports_streaming: bool = False
-    supports_webhooks: bool = False
-    supports_polling: bool = False
-    max_message_length: int | None = None
-    max_media_items: int | None = None
+    headers: dict[str, str] = field(default_factory=dict)
+    body: bytes = b""
+    query: dict[str, str] = field(default_factory=dict)
+    path_params: dict[str, str] = field(default_factory=dict)
 
 
 class BaseChannel(Protocol):
-    """Protocol every channel adapter must satisfy."""
+    """The only adapter contract that matters."""
 
-    contract_version: str
-    channel_type: str
-    capabilities: ChannelCapabilities
+    name: ClassVar[str]
+    transport: ClassVar[str]
+    auth_method: ClassVar[str]
 
-    async def start(self) -> None:
-        """Start the adapter runtime."""
-
-    async def stop(self) -> None:
-        """Stop the adapter runtime."""
-
-    async def send(self, message: OutboundMessage) -> str:
-        """Deliver one outbound message and return the channel message id."""
-
-    async def acknowledge(self, message: UniversalMessage) -> None:
-        """Acknowledge receipt to the upstream transport when applicable."""
-
-    async def health_check(self) -> HealthStatus:
-        """Report runtime health for lifecycle management."""
+    instance_id: str
+    config: dict[str, Any]
+    store: SecureStore
+    kernel: KernelHandle
 
     async def setup(self) -> SetupResult:
-        """Run or continue interactive setup for auth-bound transports."""
+        """Authenticate and prepare the instance."""
+
+    async def start(self) -> None:
+        """Begin receiving from the transport."""
+
+    async def stop(self) -> None:
+        """Disconnect gracefully."""
+
+    def to_message(self, raw: dict[str, Any]) -> Message:
+        """Convert transport payload to a universal message."""
+
+    async def from_message(self, msg: Message) -> None:
+        """Convert universal message to transport send."""
+
+    @property
+    def capabilities(self) -> ChannelCapabilities:
+        """Declared adapter capabilities."""
+
+    async def reset_setup(self) -> None:
+        """Optional auth reset hook."""
+
+    async def health_check(self) -> HealthStatus:
+        """Optional health signal."""
+
+    async def background_tasks(self) -> list[object]:
+        """Optional long-running tasks owned by the adapter."""
+
+    async def verify_signature(self, request: RawRequest) -> bool:
+        """Optional HTTP verification hook."""

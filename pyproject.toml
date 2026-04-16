@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "unigate"
-version = "0.1.0a0"
-description = "Universal messaging gateway kernel"
+version = "0.2.0a0"
+description = "Universal messaging exchange"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -25,21 +25,10 @@ classifiers = [
 ]
 dependencies = []
 
-[project.scripts]
-unigate = "unigate.cli:run"
-
 [project.optional-dependencies]
 dev = [
   "mypy>=1.11",
-  "pytest>=8.3",
-  "pytest-asyncio>=0.24",
   "ruff>=0.6",
-]
-yaml = [
-  "PyYAML>=6.0",
-]
-server = [
-  "uvicorn>=0.30",
 ]
 
 [tool.setuptools]
@@ -47,10 +36,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100

@@ -1,101 +1,46 @@
 # Roadmap
 
-## Delivery Strategy
+## Phase 1
 
-The implementation should move in layers. Kernel contracts and local testability
-come first. Real channels come only after the core durability model is proven.
+Architecture reset and new base contracts.
 
-## Phase 1: Kernel Core
+- universal `Message`
+- channel contract
+- capabilities
+- lifecycle types
+- kernel events
+- exchange skeleton
 
-Target outcome: a fully testable messaging kernel with no external platform
-dependencies.
+## Phase 2
 
-Deliverables:
+Storage interfaces and first backends.
 
-- message envelope and outbound contract
-- base channel and extension contracts
-- instance registry and lifecycle state machine
-- in-memory and SQLite backends
-- durable inbox and outbox
-- session tracking
-- deduplication
-- interaction correlation with timeout cleanup
-- internal event bus
-- `internal` and `fake` channels
-- test kit and fixtures
+- inbox
+- outbox
+- session
+- secure store
+- dedup
+- memory
+- SQLite
 
-Exit criteria:
+## Phase 3
 
-- fake channel can receive inbound traffic and deliver outbound responses
-- inbox and outbox survive restart
-- duplicate inbound events are not reprocessed
-- session creation and reply routing work
-- interaction responses correlate correctly
-- global backpressure limits are enforced without dropping messages
+Exchange kernel pipeline.
 
-## Phase 2: HTTP Edge And First Real Channels
+- receive
+- store
+- forward
+- retry
+- backpressure
 
-Target outcome: the kernel can accept webhook traffic and support at least one
-real chat platform.
+## Phase 4
 
-Deliverables:
+Instance manager and extensions.
 
-- webhook router with mountable ASGI integration
-- configurable webhook prefix
-- CLI channel
-- Telegram adapter with polling and webhook modes
-- outbox replay CLI support for operational recovery
+## Phase 5
 
-Exit criteria:
+Router / ASGI, CLI, and simple adapters.
 
-- a real Telegram message reaches the handler and is replied to correctly
-- webhook verification and routing are stable
-- pending outbound work can be replayed after recovery
+## Phase 6
 
-## Phase 3: Auth Lifecycle And Standalone Topology
-
-Target outcome: stateful channel setup flows and standalone deployment work.
-
-Deliverables:
-
-- setup lifecycle orchestration
-- secure store with encryption support
-- WhatsApp QR-based channel
-- Slack OAuth-based channel
-- `websocket_server` channel for parent-process integration
-- watchdogs for stale setup and route reconciliation
-
-Exit criteria:
-
-- setup-required flows work without restarting the process
-- credentials can expire and recover through the lifecycle state machine
-- standalone `unigate serve` can connect to a parent application over WebSocket
-
-## Phase 4: Ecosystem And Packaging
-
-Target outcome: the project is usable as a public open-source platform.
-
-Deliverables:
-
-- extension system completion
-- first-party extensions
-- optional MCP module
-- complete CLI surface
-- packaging and release automation
-- contributor examples and adapter authoring guides
-
-Exit criteria:
-
-- external contributors can add a channel without modifying kernel internals
-- MCP-compatible clients can use the gateway without custom glue code
-- packaging and documentation support independent adoption
-
-## Cross-Cutting Requirements
-
-These apply to all phases:
-
-- semantic versioning for the package
-- explicit compatibility for adapter contracts
-- docs updated alongside behavior changes
-- no private-planning artifacts in the public repo
-- each major phase ends with runnable tests, not just scaffolding
+Real external adapters and operational polish.
