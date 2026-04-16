@@ -362,6 +362,7 @@ def _load_builtins(registry: PluginRegistry) -> None:
     from .channel_web import WebChannelPlugin
     from .channel_telegram import TelegramChannelPlugin
     from .channel_whatsapp import WhatsAppChannelPlugin
+    from .channel_webui import WebUIChannel
     from .match_from import FromMatcher
     from .match_text import TextContainsMatcher, TextPatternMatcher
     from .match_sender import SenderMatcher, SenderPatternMatcher
@@ -378,6 +379,7 @@ def _load_builtins(registry: PluginRegistry) -> None:
         WebChannelPlugin,
         TelegramChannelPlugin,
         WhatsAppChannelPlugin,
+        WebUIChannel,
         FromMatcher,
         TextContainsMatcher,
         TextPatternMatcher,

@@ -254,27 +254,45 @@ unigate dead-letters
 
 ## Runtime Interfaces
 
-### ASGI App
+### Unified Serve Command
 
-```python
-from unigate.runtime import UnigateASGIApp
+Start all configured instances with unified HTTP routing:
 
-app = UnigateASGIApp(exchange, mount_prefix="/unigate")
+```bash
+unigate serve --config unigate.yaml --port 8080
 ```
 
 Routes:
-- `GET /{prefix}/status` - Instance status
-- `GET /{prefix}/health` - Health check
-- `POST /{prefix}/webhook/{instance}` - Webhook receiver
+- `GET /{prefix}/status` - Status dashboard with instance info and stats
+- `GET /{prefix}/health` - Health check (for load balancers)
+- `GET /{prefix}/instances` - List all instances with states
+- `GET /{prefix}/web/{instance}` - Web UI for webui channels
+- `POST /{prefix}/webhook/{instance}` - Webhook for other channels
+
+### ASGI App
+
+```python
+from unigate import Unigate
+
+gate = Unigate.from_config("unigate.yaml")
+app = gate.create_server_app(port=8080)
+```
+
+Or mount to existing ASGI app:
+
+```python
+gate.mount_to_app(app, prefix="/unigate")
+```
 
 ### CLI Commands
 
 ```bash
-unigate plugins list          # List plugins
-unigate instances list        # List instances
-unigate inbox list           # List inbox
-unigate outbox list          # List outbox
-unigate dead-letters         # View dead letters
+unigate serve --config my.yaml          # Start unified server
+unigate plugins list                    # List plugins
+unigate instances list                  # List instances
+unigate inbox list                      # List inbox
+unigate outbox list                     # List outbox
+unigate dead-letters                   # View dead letters
 ```
 
 ## File Structure

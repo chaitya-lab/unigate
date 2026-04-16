@@ -10,7 +10,7 @@ from uuid import uuid4
 from .events import KernelEvent
 from .kernel import Exchange, Handler
 from .message import Message
-from .runtime import UnigateASGIApp
+from .runtime import create_app, UnigateApp
 from .stores import FileStores, InMemoryStores, NamespacedSecureStore, SQLiteStores
 
 
@@ -35,9 +35,8 @@ class Unigate:
     @classmethod
     def from_config(cls, config_path: str) -> Unigate:
         """Create Unigate from a YAML config file."""
-        import yaml
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
+        from .config import load_yaml
+        config = load_yaml(config_path)
         return cls.from_dict(config)
 
     @classmethod
@@ -81,11 +80,11 @@ class Unigate:
         instance_manager = cfg.get("instances", {})
         secure_store = NamespacedSecureStore()
         from . import adapters as adapters_module
-        from .registry import get_registry, register_plugin_dirs
+        from .plugins.base import get_registry
         
-        # Load plugins from config directories
         plugin_dirs = cfg.get("unigate", {}).get("plugin_dirs", [])
         if plugin_dirs:
+            from .plugins.base import register_plugin_dirs
             register_plugin_dirs(plugin_dirs)
         
         registry = get_registry()
@@ -93,7 +92,6 @@ class Unigate:
         for instance_id, instance_config in instance_manager.items():
             channel_type = instance_config.get("type", "internal")
             
-            # Try to get channel from registry first
             channel_cls = registry.get_channel(channel_type)
             
             if channel_type == "internal":
@@ -111,7 +109,6 @@ class Unigate:
                     config=instance_config,
                 )
             else:
-                # Fallback to fake webhook adapter for unknown types
                 adapter = adapters_module.FakeWebhookAdapter(
                     instance_id=instance_id,
                     store=secure_store.for_instance(instance_id),
@@ -146,7 +143,7 @@ class Unigate:
         handler: Callable[[Message], AsyncIterator[Message] | Message | list[Message] | None],
     ) -> Callable[[Message], AsyncIterator[Message] | Message | list[Message] | None]:
         """Decorator to register a message handler."""
-        self._message_handlers.append(handler)  # type: ignore[arg-type]
+        self._message_handlers.append(handler)
         if self._exchange:
             self._exchange.set_handler(handler)
         return handler
@@ -156,15 +153,15 @@ class Unigate:
         def decorator(func: F) -> F:
             if event_name not in self._event_handlers:
                 self._event_handlers[event_name] = []
-            self._event_handlers[event_name].append(func)  # type: ignore[arg-type]
+            self._event_handlers[event_name].append(func)
             if self._exchange:
                 from .extensions import EventExtension
-                ext = _EventHandlerExtension(event_name, func)  # type: ignore[arg-type]
+                ext = _EventHandlerExtension(event_name, func)
                 self._exchange.add_event_extension(ext)
             return func
-        return decorator  # type: ignore[return-value]
+        return decorator
 
-    def mount_to_app(self, app: Any, prefix: str | None = None) -> UnigateASGIApp:
+    def mount_to_app(self, app: Any, prefix: str | None = None) -> UnigateApp:
         """Mount the unigate ASGI app into an existing ASGI application."""
         if self._exchange is None:
             self._exchange = Exchange(
@@ -175,13 +172,40 @@ class Unigate:
                 interactions=InMemoryStores(),
             )
         prefix = prefix or self._mount_prefix
-        asgi_app = UnigateASGIApp(self._exchange, mount_prefix=prefix)
+        asgi_app = create_app(self._exchange, mount_prefix=prefix)
         if hasattr(app, "mount"):
             app.mount(prefix, asgi_app)
         return asgi_app
 
-    async def serve(self) -> None:
-        """Run the exchange as a standalone server."""
+    def create_server_app(self, port: int = 8080) -> UnigateApp:
+        """Create a standalone ASGI app for running with uvicorn."""
+        if self._exchange is None:
+            self._exchange = Exchange(
+                inbox=InMemoryStores(),
+                outbox=InMemoryStores(),
+                sessions=InMemoryStores(),
+                dedup=InMemoryStores(),
+                interactions=InMemoryStores(),
+            )
+        app = create_app(self._exchange, mount_prefix=self._mount_prefix, port=port)
+        
+        for instance_id, inst in self._exchange.instances.items():
+            channel = inst.channel if hasattr(inst, "channel") else inst
+            if getattr(channel, "name", None) == "webui":
+                app.register_webui(instance_id, channel)
+        
+        return app
+
+    async def serve(self, host: str = "0.0.0.0", port: int = 8080) -> None:
+        """Run the exchange as a standalone server with uvicorn."""
+        import uvicorn
+        app = self.create_server(port)
+        config = uvicorn.Config(app, host=host, port=port, log_level="info")
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    async def serve_forever(self) -> None:
+        """Run the exchange until cancelled."""
         if self._exchange is None:
             self._exchange = Exchange(
                 inbox=InMemoryStores(),

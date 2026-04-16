@@ -545,6 +545,38 @@ Examples:
         description="Stop the background daemon. Sends shutdown signal and cleans up.",
     )
     
+    # Serve command - unified server with all instances
+    serve_parser = sub.add_parser(
+        "serve",
+        help="Start unified server with all configured instances",
+        description="Start all instances from config file with unified HTTP routing",
+    )
+    serve_parser.add_argument(
+        "--config", "-c",
+        default="unigate.yaml",
+        help="Path to configuration file (default: unigate.yaml)",
+    )
+    serve_parser.add_argument(
+        "--port", "-p",
+        type=int,
+        default=8080,
+        help="Port to listen on (default: 8080)",
+    )
+    serve_parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Host to bind to (default: 0.0.0.0)",
+    )
+    serve_parser.add_argument(
+        "--mount-prefix",
+        default="/unigate",
+        help="URL prefix for all routes (default: /unigate)",
+    )
+    serve_parser.add_argument(
+        "--handler",
+        help="Python module with handler function (e.g., 'my_handler:handle')",
+    )
+    
     # Cleanup command
     cleanup_parser = sub.add_parser(
         "cleanup",
@@ -990,6 +1022,125 @@ Examples:
         
         socket_path.unlink(missing_ok=True)
         print("Daemon stopped")
+        return 0
+    
+    if args.command == "serve":
+        from .runtime import create_app
+        from .gate import Unigate
+        from .stores import NamespacedSecureStore
+        
+        config_path = args.config
+        if not Path(config_path).exists():
+            print(f"Config file not found: {config_path}", file=sys.stderr)
+            print("Creating default config...")
+            default_config = """# Unigate Configuration
+unigate:
+  mount_prefix: /unigate
+
+storage:
+  backend: memory
+
+instances:
+  web:
+    type: webui
+    port: 8080
+"""
+            Path(config_path).write_text(default_config)
+            print(f"Created: {config_path}")
+            print("Edit the config file and run 'unigate serve' again")
+            return 1
+        
+        try:
+            gate = Unigate.from_config(config_path)
+        except Exception as e:
+            print(f"Failed to load config: {e}", file=sys.stderr)
+            return 1
+        
+        exchange = gate._exchange
+        secure_store = NamespacedSecureStore()
+        
+        if args.handler:
+            try:
+                module_path, func_name = args.handler.split(":")
+                import importlib
+                module = importlib.import_module(module_path)
+                handler_func = getattr(module, func_name)
+                exchange.set_handler(handler_func)
+            except Exception as e:
+                print(f"Failed to load handler: {e}", file=sys.stderr)
+                return 1
+        
+        app = create_app(
+            exchange=exchange,
+            mount_prefix=args.mount_prefix,
+            port=args.port,
+        )
+        
+        for instance_id, inst in exchange.instances.items():
+            channel = inst.channel if hasattr(inst, "channel") else inst
+            if getattr(channel, "name", None) == "webui":
+                app.register_webui(instance_id, channel)
+        
+        for inst in exchange.instances.values():
+            channel = inst.channel if hasattr(inst, "channel") else inst
+            try:
+                if hasattr(channel, "setup"):
+                    asyncio.run(channel.setup())
+                if hasattr(channel, "start"):
+                    asyncio.run(channel.start())
+            except Exception as e:
+                print(f"Warning: Failed to start instance: {e}", file=sys.stderr)
+        
+        print(f"\n{'='*60}")
+        print("Unigate Unified Server")
+        print(f"{'='*60}")
+        print(f"  Config: {config_path}")
+        print(f"  Mount:  {args.mount_prefix}")
+        print(f"  Server: http://{args.host}:{args.port}{args.mount_prefix}/")
+        print(f"\nRoutes:")
+        print(f"  GET  {args.mount_prefix}/status      - Status dashboard")
+        print(f"  GET  {args.mount_prefix}/health     - Health check")
+        print(f"  GET  {args.mount_prefix}/instances  - Instance list")
+        for instance_id, inst in exchange.instances.items():
+            channel = inst.channel if hasattr(inst, "channel") else inst
+            name = getattr(channel, "name", None)
+            if name == "webui":
+                print(f"  GET  {args.mount_prefix}/web/{instance_id}    - Web UI")
+            else:
+                print(f"  POST {args.mount_prefix}/webhook/{instance_id} - Webhook")
+        print(f"\nInstances:")
+        for instance_id, inst in exchange.instances.items():
+            channel = inst.channel if hasattr(inst, "channel") else inst
+            state = "active"
+            if hasattr(channel, "state"):
+                s = channel.state
+                state = s.value if hasattr(s, "value") else str(s)
+            print(f"  [{state}] {instance_id}")
+        print(f"\n{'='*60}")
+        print("Press Ctrl+C to stop\n")
+        
+        try:
+            import uvicorn
+            uvicorn.run(
+                app,
+                host=args.host,
+                port=args.port,
+                log_level="info",
+            )
+        except ImportError:
+            print("uvicorn not installed. Install with: pip install uvicorn")
+            return 1
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+        finally:
+            for inst in exchange.instances.values():
+                channel = inst.channel if hasattr(inst, "channel") else inst
+                try:
+                    if hasattr(channel, "stop"):
+                        asyncio.run(channel.stop())
+                except Exception:
+                    pass
+        
         return 0
     
     if args.command == "status":

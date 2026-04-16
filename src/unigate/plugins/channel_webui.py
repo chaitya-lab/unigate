@@ -225,6 +225,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
 class WebUIChannel:
     name: ClassVar[str] = "webui"
+    type: ClassVar[str] = "channel"
     transport: ClassVar[str] = "http"
     auth_method: ClassVar[str] = "none"
 
@@ -333,12 +334,20 @@ class WebUIChannel:
 
     async def _serve_ui(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         from datetime import datetime, timezone
-        # Instance-scoped session for WebUI
         session_id = f"{self.instance_id}:web:{uuid4().hex[:8]}"
-        html = HTML_TEMPLATE.format(
-            instance_id=self.instance_id,
-            session_id=session_id
-        )
+        
+        class SafeDict(dict):
+            def __getitem__(self, key):
+                try:
+                    return super().__getitem__(key)
+                except KeyError:
+                    return "{" + key + "}"
+        
+        html = HTML_TEMPLATE.format_map(SafeDict({
+            "instance_id": self.instance_id,
+            "session_id": session_id,
+        }))
+        
         await send({
             "type": "http.response.start",
             "status": 200,

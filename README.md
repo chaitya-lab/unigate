@@ -64,16 +64,26 @@ routing:
 ### 2. Start Server
 
 ```powershell
-# Start with uvicorn
-uvicorn unigate.runtime:app --host 0.0.0.0 --port 8080
+# Start all configured instances with unified routing
+unigate serve --config unigate.yaml --port 8080
 
-# Or use the built-in serve command
+# Or use defaults (looks for unigate.yaml in current directory)
 unigate serve
 ```
 
-### 3. Access Web UI
+### 3. Access Routes
 
-Open `http://localhost:8080/unigate/web_ui/` to send test messages.
+All instances share a single port with unified routing:
+
+| Route | Description |
+|-------|-------------|
+| `GET /unigate/status` | Status dashboard with instance info |
+| `GET /unigate/health` | Health check for load balancers |
+| `GET /unigate/instances` | List all instances with states |
+| `GET /unigate/web/{name}` | Web UI for webui channels |
+| `POST /unigate/webhook/{name}` | Webhook for other channels |
+
+Open `http://localhost:8080/unigate/web/web_ui/` to access the Web UI.
 
 ## Plugin System
 
@@ -207,34 +217,40 @@ routing:
 ## CLI Commands
 
 ```powershell
+# Serve - Unified server with all configured instances
+unigate serve                           # Start with unigate.yaml
+unigate serve --config my.yaml         # Custom config
+unigate serve --port 9000              # Custom port
+unigate serve --mount-prefix /api      # Custom mount prefix
+
 # Plugin management
 unigate plugins list                    # List all plugins
-unigate plugins status                   # Plugin summary
+unigate plugins status                  # Plugin summary
 unigate plugins enable <name>           # Enable a plugin
 unigate plugins disable <name>          # Disable a plugin
 unigate plugins gen-config              # Generate config template
 
 # Instance management
-unigate instances list                   # List instances
-unigate instances status                 # Instance details
+unigate instances list                  # List instances
+unigate instances status                # Instance details
 
 # Message operations
-unigate inbox list                       # List inbox messages
-unigate inbox show <id>                  # Show message
-unigate inbox replay <id>               # Replay message
+unigate inbox list                      # List inbox messages
+unigate inbox show <id>                 # Show message
+unigate inbox replay <id>              # Replay message
 
-unigate outbox list                      # List outbox
-unigate outbox retry                    # Retry failed
-unigate outbox fail <id>                # Mark as failed
+unigate outbox list                     # List outbox
+unigate outbox retry                   # Retry failed
+unigate outbox fail <id>               # Mark as failed
 
-unigate dead-letters                     # View dead letters
-unigate logs                            # View events
-unigate health                          # Health check
+unigate dead-letters                    # View dead letters
+unigate logs                           # View events
+unigate health                         # Health check
 
 # Daemon operations
-unigate start                           # Start daemon
-unigate stop                            # Stop daemon
-unigate status                          # Status
+unigate start                          # Start daemon
+unigate stop                           # Stop daemon
+unigate status                         # Status
 ```
 
 ## Development
