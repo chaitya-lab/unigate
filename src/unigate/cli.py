@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 
+import yaml
+
 from .adapters import InternalAdapter
 from .kernel import Exchange
 from .stores import InMemoryStores, NamespacedSecureStore
@@ -355,6 +357,30 @@ Examples:
     logs = sub.add_parser("logs", help="Show recent events")
     logs.add_argument("--limit", "-n", type=int, default=100, help="Number of events to show")
     
+    # Plugins
+    plug = sub.add_parser("plugins", help="Plugin management")
+    plug_sub = plug.add_subparsers(dest="subcommand", required=True)
+    
+    plug_list = plug_sub.add_parser("list", help="List all available plugins")
+    plug_list.add_argument("--type", "-t", choices=["channel", "match", "transform", "transport"], help="Filter by type")
+    plug_list.add_argument("--enabled", "-e", action="store_true", help="Show only enabled")
+    plug_list.add_argument("--disabled", "-d", action="store_true", help="Show only disabled")
+    
+    plug_status = plug_sub.add_parser("status", help="Show plugin status details")
+    plug_status.add_argument("plugin", nargs="?", help="Plugin name to check")
+    
+    plug_enable = plug_sub.add_parser("enable", help="Enable a plugin")
+    plug_enable.add_argument("plugin", help="Plugin name to enable")
+    
+    plug_disable = plug_sub.add_parser("disable", help="Disable a plugin")
+    plug_disable.add_argument("plugin", help="Plugin name to disable")
+    
+    plug_gen = plug_sub.add_parser("gen-config", help="Generate config template from plugins")
+    plug_gen.add_argument("--output", "-o", help="Output file path")
+    
+    plug_validate = plug_sub.add_parser("validate", help="Validate plugins in config")
+    plug_validate.add_argument("--config", "-c", help="Config file to validate")
+    
     args = parser.parse_args(list(argv) if argv is not None else None)
     socket_path, pid_path = get_daemon_paths()
     
@@ -512,6 +538,106 @@ Examples:
             print("daemon not running - outbox operations require daemon", file=sys.stderr)
             return 1
         return 0
+    
+    # Plugin management commands (work without daemon)
+    if args.command == "plugins":
+        from .plugins.base import get_registry
+        
+        registry = get_registry()
+        
+        if args.subcommand == "list":
+            plugins = registry.list_plugins()
+            
+            for p in plugins:
+                if args.type and p.type != args.type:
+                    continue
+                if args.enabled and not p.enabled:
+                    continue
+                if args.disabled and p.enabled:
+                    continue
+                
+                status = "[+]" if p.enabled else "[-]"
+                print(f"{status} {p.type:10} {p.full_name}")
+            return 0
+        
+        if args.subcommand == "status":
+            if args.plugin:
+                full_name = registry._resolve_name(args.plugin)
+                found = False
+                for reg_name, entry in list(registry.channels.items()) + list(registry.matches.items()) + list(registry.transforms.items()) + list(registry.transports.items()):
+                    if reg_name == full_name:
+                        print(f"Plugin: {reg_name}")
+                        print(f"  Type: {entry.cls.type}")
+                        print(f"  Enabled: {entry.enabled}")
+                        print(f"  Source: {entry.source}")
+                        print(f"  Description: {getattr(entry.cls, 'description', '')}")
+                        found = True
+                        break
+                if not found:
+                    print(f"Plugin '{args.plugin}' not found", file=sys.stderr)
+                    return 1
+            else:
+                plugins = registry.list_plugins()
+                total = len(plugins)
+                enabled = sum(1 for p in plugins if p.enabled)
+                by_type = {}
+                for p in plugins:
+                    by_type.setdefault(p.type, []).append(p.full_name)
+                
+                print("Plugin Summary:")
+                print(f"  Total: {total}")
+                print(f"  Enabled: {enabled}")
+                print(f"  Disabled: {total - enabled}")
+                print()
+                for ptype, names in sorted(by_type.items()):
+                    print(f"  {ptype}s ({len(names)}): {', '.join(sorted(names))}")
+            return 0
+        
+        if args.subcommand == "enable":
+            if registry.enable(args.plugin):
+                print(f"Enabled: {args.plugin}")
+                return 0
+            else:
+                print(f"Plugin '{args.plugin}' not found", file=sys.stderr)
+                return 1
+        
+        if args.subcommand == "disable":
+            if registry.disable(args.plugin):
+                print(f"Disabled: {args.plugin}")
+                return 0
+            else:
+                print(f"Plugin '{args.plugin}' not found", file=sys.stderr)
+                return 1
+        
+        if args.subcommand == "gen-config":
+            config = registry.generate_config()
+            output = args.output
+            if output:
+                Path(output).write_text(yaml.dump(config, default_flow_style=False))
+                print(f"Config written to: {output}")
+            else:
+                print(yaml.dump(config, default_flow_style=False))
+            return 0
+        
+        if args.subcommand == "validate":
+            if args.config:
+                with open(args.config) as f:
+                    config = yaml.safe_load(f)
+            else:
+                print("No config file specified", file=sys.stderr)
+                return 1
+            
+            from .routing import load_rules_from_config
+            rules, warnings = load_rules_from_config(config, strict=False)
+            
+            print(f"Rules loaded: {len(rules)}")
+            if warnings:
+                print(f"Warnings: {len(warnings)}")
+                for w in warnings:
+                    print(f"  - {w}")
+            else:
+                print("No warnings")
+            return 0
     
     return 0
 
