@@ -1,199 +1,281 @@
-# unigate
+# Unigate
 
-Transport-only messaging exchange for multi-channel systems.
+**Universal messaging exchange with plugin-based channels and rule-based routing.**
 
-Receives inbound payloads, deduplicates and stores them, routes handler output,
-fans out per destination, retries failures, and exposes runtime operations through
-ASGI routes and CLI commands.
+Receive messages from any channel, apply routing rules, and forward to destinations with retry logic and circuit breakers.
+
+## Features
+
+- **Plugin Architecture** - Flat structure with type-prefixed plugins (`channel.telegram`, `match.text_contains`, `transform.truncate`, `transport.http`)
+- **Rule-Based Routing** - YAML configuration for routing based on sender, content, group, time, etc.
+- **Channel Lifecycle** - Instances support setup → active → degraded states
+- **Resilience** - Retry policies, circuit breakers, dead letter queue
+- **Multiple Channels** - Telegram, WhatsApp, Web, WebSocket, FTP, and more
+- **CLI & Web UI** - Full management interface
 
 ## Installation
 
 ```powershell
+# Clone and install
+git clone https://github.com/yourrepo/unigate.git
+cd unigate
+
 # Create virtual environment
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 
 # Install in development mode
-pip install -e .
+pip install -e ".[dev]"
 
 # Run tests
-PYTHONPATH=src python -m unittest discover -s tests -v
-```
-
-Or with dev dependencies (linting, type checking):
-
-```powershell
-pip install -e ".[dev]"
+python -m pytest tests/ -v
 ```
 
 ## Quick Start
 
-```python
-from unigate import Unigate, Message
+### 1. Create Configuration
 
-gate = Unigate.from_config("unigate.yaml")
+```yaml
+# unigate.yaml
+unigate:
+  mount_prefix: /unigate
 
-@gate.on_message
-async def handle(msg: Message) -> Message:
-    return Message(
-        to=[],
-        session_id=msg.session_id,
-        from_instance="handler",
-        sender=msg.sender,
-        ts=msg.ts,
-        text=f"got: {msg.text}"
-    )
+instances:
+  web_ui:
+    type: webui
+    port: 8080
 
-# Run with ASGI server (uvicorn, hypercorn, etc.)
-gate.serve()
+  sales_bot:
+    type: telegram
+    token: !env:TELEGRAM_BOT_TOKEN
+    mode: polling
+
+routing:
+  default_action: keep
+  rules:
+    - name: sales-routing
+      priority: 100
+      match:
+        text_contains: "sales"
+      actions:
+        forward_to: [sales_bot]
 ```
 
-## Architecture
+### 2. Start Server
 
-- **one universal `Message`** for both directions
-- **adapter boundary (`BaseChannel`)** for translation and capability degradation
-- **exchange pipelines** for inbound and outbound message flow
-- **lifecycle-aware instances** with setup and health transitions
-- **extension chain** for inbound/outbound/event hooks
-- **durable stores**: `InMemoryStores`, `SQLiteStores`
+```powershell
+# Start with uvicorn
+uvicorn unigate.runtime:app --host 0.0.0.0 --port 8080
+
+# Or use the built-in serve command
+unigate serve
+```
+
+### 3. Access Web UI
+
+Open `http://localhost:8080/unigate/web_ui/` to send test messages.
+
+## Plugin System
+
+### Available Plugins
+
+| Type | Plugin | Description |
+|------|--------|-------------|
+| channel | web | Generic HTTP webhook |
+| channel | webui | Built-in web UI for testing |
+| channel | telegram | Telegram Bot API |
+| channel | whatsapp | WhatsApp Business API |
+| match | text_contains | Match message content |
+| match | sender | Match by sender ID |
+| match | from | Match by source instance |
+| match | has_media | Match media presence |
+| match | day_of_week | Match day of week |
+| match | hour_of_day | Match hour of day |
+| transform | truncate | Truncate message text |
+| transform | add_metadata | Add metadata fields |
+| transform | extract_subject | Extract subject line |
+| transport | http | HTTP/HTTPS delivery |
+| transport | websocket | WebSocket delivery |
+| transport | ftp | FTP file transfer |
+| transport | file | Local file output |
+
+### List Available Plugins
+
+```powershell
+unigate plugins list
+```
+
+Output:
+```
+[+] channel    channel.telegram
+[+] channel    channel.web
+[+] channel    channel.webui
+[+] channel    channel.whatsapp
+[+] match      match.day_of_week
+[+] match      match.from
+[+] match      match.has_media
+[+] match      match.sender
+[+] match      match.text_contains
+[+] transform  transform.add_metadata
+[+] transform  transform.truncate
+[+] transport  transport.file
+[+] transport  transport.ftp
+[+] transport  transport.http
+[+] transport  transport.websocket
+```
+
+### Generate Config Template
+
+```powershell
+unigate plugins gen-config > plugins.yaml
+```
+
+## Routing Rules
+
+Rules are defined in YAML. Lower priority number = higher priority (checked first).
+
+### Match Conditions
+
+```yaml
+routing:
+  rules:
+    # By source instance
+    - name: from-web
+      priority: 100
+      match:
+        from_instance: web_ui
+      actions:
+        forward_to: [telegram_bot]
+    
+    # By text content
+    - name: sales-keyword
+      priority: 100
+      match:
+        text_contains: "sales"
+      actions:
+        forward_to: [sales_team]
+    
+    # By sender pattern (glob)
+    - name: vip-users
+      priority: 50
+      match:
+        sender_pattern: "vip_*"
+      actions:
+        forward_to: [vip_channel]
+    
+    # By group ID
+    - name: dev-group
+      priority: 100
+      match:
+        group_id: "dev-*"
+      actions:
+        forward_to: [dev_team]
+    
+    # Multiple conditions (AND logic)
+    - name: vip-dev
+      priority: 10
+      match:
+        sender_pattern: "vip_*"
+        group_id: "dev-*"
+      actions:
+        forward_to: [vip_dev_channel]
+    
+    # Time-based
+    - name: business-hours
+      priority: 100
+      match:
+        hour_of_day: [9, 10, 11, 12, 13, 14, 15, 16, 17]
+      actions:
+        forward_to: [support_live]
+```
+
+### Actions
+
+```yaml
+routing:
+  rules:
+    - name: example
+      priority: 100
+      match:
+        text_contains: "help"
+      actions:
+        forward_to: [support_bot]      # Forward to destination
+        keep_in_default: true           # Also keep in source
+        add_tags: [support, urgent]     # Add tags
+```
 
 ## CLI Commands
 
 ```powershell
-unigate serve                    # Start kernel (use with ASGI server)
-unigate start                   # Start daemon in background
-unigate stop                    # Stop daemon
-unigate status                  # Show status
-unigate instances list           # List all instances
-unigate instances status <name> # Instance details
-unigate inbox list              # List inbox records
-unigate outbox list             # List outbox records
-unigate outbox retry            # Retry failed messages
-unigate outbox dead-letters     # View dead letters
+# Plugin management
+unigate plugins list                    # List all plugins
+unigate plugins status                   # Plugin summary
+unigate plugins enable <name>           # Enable a plugin
+unigate plugins disable <name>          # Disable a plugin
+unigate plugins gen-config              # Generate config template
+
+# Instance management
+unigate instances list                   # List instances
+unigate instances status                 # Instance details
+
+# Message operations
+unigate inbox list                       # List inbox messages
+unigate inbox show <id>                  # Show message
+unigate inbox replay <id>               # Replay message
+
+unigate outbox list                      # List outbox
+unigate outbox retry                    # Retry failed
+unigate outbox fail <id>                # Mark as failed
+
+unigate dead-letters                     # View dead letters
+unigate logs                            # View events
+unigate health                          # Health check
+
+# Daemon operations
+unigate start                           # Start daemon
+unigate stop                            # Stop daemon
+unigate status                          # Status
 ```
-
-## Channels
-
-### Telegram
-
-Two modes:
-
-1. **polling** (default, good for development):
-   - Long polling with 55-second timeout
-   - No external URL needed
-   - Efficient - only requests when updates available
-
-2. **webhook** (better for production):
-   - Telegram pushes updates to your URL
-   - Requires public HTTPS endpoint
-   - Lower latency, higher efficiency
-
-```yaml
-instances:
-  my_bot:
-    type: telegram
-    token: !env:TELEGRAM_BOT_TOKEN
-    mode: polling  # or webhook
-
-  # Multiple Telegram bots:
-  support_bot:
-    type: telegram
-    token: !env:SUPPORT_BOT_TOKEN
-    mode: polling
-
-  sales_bot:
-    type: telegram  
-    token: !env:SALES_BOT_TOKEN
-    mode: webhook
-    webhook_url: https://yourdomain.com/unigate/webhook/sales_bot
-    webhook_secret: your-secret
-```
-
-### Web
-
-Generic HTTP webhook with multiple auth methods:
-
-```yaml
-instances:
-  api_channel:
-    type: web
-    auth_method: api_key
-    api_key: !env:API_KEY
-```
-
-### Internal
-
-In-process messaging for testing or internal use:
-
-```yaml
-instances:
-  internal:
-    type: internal
-```
-
-## Configuration (unigate.yaml)
-
-```yaml
-unigate:
-  mount_prefix: /unigate
-  max_concurrent_processing: 50
-
-storage:
-  backend: sqlite  # or: memory, redis
-  path: ./unigate.db
-
-deduplication:
-  window_seconds: 300
-
-instances:
-  my_telegram:
-    type: telegram
-    token: !env:TELEGRAM_BOT_TOKEN
-    mode: polling
-    retry:
-      max_attempts: 5
-      base_delay_seconds: 2
-      max_delay_seconds: 30
-    circuit_breaker:
-      failure_threshold: 5
-      recovery_timeout: 60
-```
-
-## Multiple Instances
-
-Each instance has its own:
-- Auth credentials (stored securely per-instance)
-- Retry policy
-- Circuit breaker
-- Outbox queue
-
-Example - Telegram with different bots:
-
-```yaml
-instances:
-  bot_alpha:
-    type: telegram
-    token: !env:BOT_ALPHA_TOKEN
-  
-  bot_beta:
-    type: telegram
-    token: !env:BOT_BETA_TOKEN
-```
-
-Messages to bot_alpha stay isolated from bot_beta.
 
 ## Development
 
-```powershell
-# Lint
-ruff check src/
+### Run Tests
 
-# Type check
-mypy src/ --strict
+```powershell
+python -m pytest tests/ -v
+```
+
+### Project Structure
+
+```
+unigate/
+├── src/unigate/
+│   ├── plugins/           # Plugin directory (flat)
+│   │   ├── base.py        # Plugin registry & protocols
+│   │   ├── channel_*.py  # Channel plugins
+│   │   ├── match_*.py    # Matcher plugins
+│   │   ├── transform_*.py # Transform plugins
+│   │   └── transport_*.py # Transport plugins
+│   ├── routing.py         # Routing engine
+│   ├── lifecycle.py       # Instance states
+│   ├── instance_manager.py # Lifecycle orchestration
+│   ├── kernel.py         # Exchange kernel
+│   ├── stores.py         # Storage backends
+│   └── cli.py            # CLI commands
+├── tests/
+│   ├── test_*.py         # Unit tests
+│   └── test_routing_comprehensive.py  # Routing tests
+└── docs/
+    ├── plugin-development.md
+    └── architecture.md
 ```
 
 ## Documentation
 
-- [Architecture](docs/architecture.md)
-- [Roadmap](docs/roadmap.md)
-- [Contributing](CONTRIBUTING.md)
+- [Plugin Development Guide](docs/plugin-development.md)
+- [Architecture Overview](docs/architecture.md)
+- [Routing Configuration](docs/routing.md)
+
+## License
+
+MIT
