@@ -1,43 +1,25 @@
 # unigate
 
-`unigate` is a messaging exchange.
+`unigate` is a transport-only messaging exchange for multi-channel systems.
 
-It receives messages from channel instances, stores them durably, forwards them
-to the correct destination, and retries failures without interpreting message
-content.
+It receives inbound payloads, deduplicates and stores them, routes handler output,
+fans out per destination, retries failures, and exposes runtime operations through
+ASGI routes and CLI commands.
 
-This repository is now in the clean 1.5 rewrite. The old prototype
-implementation is being replaced.
+## 1.5 architecture
 
-## Core Model
+- one universal `Message` contract for both directions
+- adapter boundary (`BaseChannel`) for translation and capability degradation
+- exchange pipelines for inbound and outbound message flow
+- lifecycle-aware instances with setup and health transitions
+- extension chain for inbound/outbound/event hooks
+- durable store implementations (`InMemoryStores`, `SQLiteStores`)
 
-- the exchange moves messages
-- instances are named authenticated connections
-- channel adapters translate platform payloads to and from one universal
-  `Message`
-- extensions enrich or filter messages without changing delivery guarantees
+## Runtime surfaces
 
-The kernel stays transport-only.
-
-## Current Focus
-
-This slice establishes the new base core:
-
-- one universal `Message`
-- one adapter contract
-- capability and lifecycle types
-- kernel event model
-- minimal exchange skeleton
-
-Not implemented yet:
-
-- storage backends
-- full receive/store/forward pipeline
-- instance manager
-- router / ASGI
-- CLI
-- extensions
-- real adapters
+- ASGI app: `UnigateASGIApp`
+- routes: `/{mount_prefix}/webhook/{instance}`, `/{mount_prefix}/status`, `/{mount_prefix}/health`
+- CLI: `unigate serve|status|instances|inbox|outbox`
 
 ## Development
 

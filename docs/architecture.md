@@ -1,62 +1,68 @@
 # Architecture
 
-## What `unigate` is
+`unigate` 1.5 is built around three transport components and strict responsibility boundaries.
 
-`unigate` is a messaging exchange.
+## Components
 
-It receives messages from instances, stores them durably, forwards them to the
-correct destination, and retries failures. It does not interpret content.
+### Exchange kernel
 
-## Three Components
+The `Exchange` owns transport guarantees:
 
-### Exchange
+- inbound pipeline: receive -> dedup -> durable inbox write -> handler dispatch
+- outbound pipeline: destination resolution -> per-destination outbox records -> send -> retry bookkeeping
+- event emission and extension invocation
+- backpressure via bounded semaphore
 
-The kernel owns:
+### Instance manager
 
-- receive
-- store
-- forward
-- retry
-- events
+`InstanceManager` tracks state transitions for each registered instance:
 
-### Instance
+- `unconfigured`
+- `setup_required`
+- `setting_up`
+- `active`
+- `degraded`
+- `reconnecting`
 
-An instance is one named authenticated connection to one channel type.
+### Channel adapters
 
-### Channel Adapter
+Adapters implement `BaseChannel` and contain channel-specific behavior:
 
-The adapter translates:
+- raw payload -> `Message` (`to_message`)
+- `Message` -> transport send (`from_message`)
+- capability declaration and downgrade behavior
+- setup/auth/health hooks
 
-- platform payload -> `Message`
-- `Message` -> platform payload
+## Storage model
 
-Capability degradation belongs here.
+The exchange depends on five store roles:
 
-## One Universal `Message`
+- inbox store (durable inbound record)
+- outbox store (durable pending/sent/retry records)
+- session store (origin resolution for `to: []`)
+- dedup store (idempotent inbound processing)
+- secure store (per-instance credentials)
 
-There is one message contract for both directions. Direction is context, not a
-separate schema.
+Built-in implementations:
 
-Important rule:
+- `InMemoryStores` for local runtime/testing
+- `SQLiteStores` for restart-safe persistence
 
-- core primitive is one outbound record per destination instance
-- broadcasts are expanded into independent records
+## Extensions
 
-## Boundaries
+Hook chains support transport-safe customization:
 
-Belongs in core:
+- inbound extensions
+- outbound extensions
+- event extensions
 
-- transport flow
-- storage
-- deduplication
-- routing
-- retry
-- lifecycle
+Each hook can mutate or drop the item while preserving persistence order guarantees.
 
-Does not belong in core:
+## Runtime interfaces
 
-- agent logic
-- workflow logic
-- business routing policy
-- cross-channel identity resolution
-- product-specific merged inbox views
+- Mountable ASGI app: `UnigateASGIApp`
+- Routes:
+  - `/{mount_prefix}/webhook/{instance_name}`
+  - `/{mount_prefix}/status`
+  - `/{mount_prefix}/health`
+- CLI operations: `serve`, `status`, `instances`, `inbox`, `outbox`

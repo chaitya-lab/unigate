@@ -1,69 +1,81 @@
+from __future__ import annotations
+
 from datetime import UTC, datetime
 import unittest
 
-from unigate import (
-    BaseChannel,
-    ChannelCapabilities,
-    Exchange,
-    HealthStatus,
-    Message,
-    Sender,
-    SetupResult,
-    SetupStatus,
-)
+from unigate import Exchange, InternalAdapter, Message, NamespacedSecureStore, Sender
+from unigate.stores import InMemoryStores
 
 
-class DummyChannel(BaseChannel):
-    name = "dummy"
-    transport = "stdio"
-    auth_method = "none"
+class KernelTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.memory = InMemoryStores()
+        self.exchange = Exchange(
+            inbox=self.memory, outbox=self.memory, sessions=self.memory, dedup=self.memory
+        )
+        store = NamespacedSecureStore()
+        self.adapter = InternalAdapter(
+            "default", store.for_instance("default"), self.exchange, config={}
+        )
+        self.exchange.register_instance("default", self.adapter)
 
-    def __init__(self) -> None:
-        self.instance_id = "dummy"
-        self.config = {}
-        self.store = None  # type: ignore[assignment]
-        self.kernel = None  # type: ignore[assignment]
-
-    async def setup(self) -> SetupResult:
-        return SetupResult(status=SetupStatus.READY)
-
-    async def start(self) -> None:
-        return None
-
-    async def stop(self) -> None:
-        return None
-
-    def to_message(self, raw: dict) -> Message:
-        return Message(
-            id="msg-1",
-            platform_id=raw.get("id"),
-            session_id="session-1",
-            from_instance=self.instance_id,
-            sender=Sender(platform_id="user-1", name="User"),
-            ts=datetime.now(UTC),
+    async def test_ingest_persists_and_dedups(self) -> None:
+        status_1 = await self.exchange.ingest(
+            "default", {"id": "a1", "session_id": "s1", "sender_id": "u1", "text": "hello"}
+        )
+        status_2 = await self.exchange.ingest(
+            "default", {"id": "a1", "session_id": "s1", "sender_id": "u1", "text": "hello"}
         )
 
-    async def from_message(self, msg: Message) -> None:
-        return None
+        self.assertEqual(status_1, "ack")
+        self.assertEqual(status_2, "duplicate")
+        self.assertEqual(len(self.memory.inbox), 1)
 
-    @property
-    def capabilities(self) -> ChannelCapabilities:
-        return ChannelCapabilities(direction="bidirectional")
+    async def test_to_empty_routes_via_session_origin(self) -> None:
+        await self.exchange.ingest(
+            "default", {"id": "in-1", "session_id": "s2", "sender_id": "origin-user", "text": "hi"}
+        )
+        outbound = Message(
+            id="out-1",
+            session_id="s2",
+            from_instance="default",
+            sender=Sender(platform_id="bot", name="Bot", is_bot=True),
+            ts=datetime.now(UTC),
+            to=[],
+            text="reply",
+        )
+        await self.exchange.enqueue_outbound("default", outbound)
+        await self.exchange.flush_outbox()
+        self.assertEqual(len(self.adapter.sent), 1)
+        self.assertEqual(self.adapter.sent[0].to, ["origin-user"])
 
-    async def health_check(self) -> HealthStatus:
-        return HealthStatus.HEALTHY
+    async def test_fanout_isolated_records(self) -> None:
+        outbound = Message(
+            id="out-fan",
+            session_id="s3",
+            from_instance="default",
+            sender=Sender(platform_id="bot", name="Bot", is_bot=True),
+            ts=datetime.now(UTC),
+            to=["a", "b", "c"],
+            text="broadcast",
+        )
+        await self.exchange.enqueue_outbound("default", outbound)
+        all_outbox = await self.memory.list_outbox()
+        self.assertEqual(len(all_outbox), 3)
 
-
-class KernelTests(unittest.TestCase):
-    def test_exchange_registers_instances(self) -> None:
-        exchange = Exchange()
-        channel = DummyChannel()
-
-        exchange.register_instance("dummy_one", channel)
-
-        self.assertIn("dummy_one", exchange.instances)
-        self.assertEqual(exchange.instances["dummy_one"].channel.name, "dummy")
-
-
-if __name__ == "__main__":
-    unittest.main()
+    async def test_retry_on_send_failure(self) -> None:
+        self.adapter.fail_next_send = True
+        outbound = Message(
+            id="out-retry",
+            session_id="s4",
+            from_instance="default",
+            sender=Sender(platform_id="bot", name="Bot", is_bot=True),
+            ts=datetime.now(UTC),
+            to=["u2"],
+            text="will retry",
+        )
+        await self.exchange.enqueue_outbound("default", outbound)
+        await self.exchange.flush_outbox()
+        all_outbox = await self.memory.list_outbox()
+        self.assertEqual(len(all_outbox), 1)
+        self.assertEqual(all_outbox[0].status, "retry")

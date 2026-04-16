@@ -1,46 +1,35 @@
 # Roadmap
 
-## Phase 1
+## Implemented in 1.5 baseline
 
-Architecture reset and new base contracts.
+- universal `Message` + adapter contract
+- inbox/outbox/session/dedup/secure storage roles
+- in-memory and SQLite durable stores
+- exchange ingest/enqueue/flush pipeline with retry bookkeeping
+- per-destination fan-out and session-origin fallback routing
+- instance lifecycle manager with setup and health transitions
+- extension interfaces (inbound/outbound/event)
+- mountable ASGI runtime surface
+- minimal CLI operations
+- internal and fake webhook adapters for development
 
-- universal `Message`
-- channel contract
-- capabilities
-- lifecycle types
-- kernel events
-- exchange skeleton
+## Next milestones
 
-## Phase 2
+### External adapters
 
-Storage interfaces and first backends.
+- Telegram
+- WhatsApp
+- Discord
+- Slack
 
-- inbox
-- outbox
-- session
-- secure store
-- dedup
-- memory
-- SQLite
+### Operability hardening
 
-## Phase 3
+- richer metrics and tracing events
+- dead-letter support for terminal failures
+- richer retry policies per instance/channel
 
-Exchange kernel pipeline.
+### Developer experience
 
-- receive
-- store
-- forward
-- retry
-- backpressure
-
-## Phase 4
-
-Instance manager and extensions.
-
-## Phase 5
-
-Router / ASGI, CLI, and simple adapters.
-
-## Phase 6
-
-Real external adapters and operational polish.
+- advanced CLI filtering and diagnostics
+- adapter scaffolding templates
+- contract test kit for third-party adapters
