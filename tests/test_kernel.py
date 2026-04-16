@@ -79,3 +79,21 @@ class KernelTests(unittest.IsolatedAsyncioTestCase):
         all_outbox = await self.memory.list_outbox()
         self.assertEqual(len(all_outbox), 1)
         self.assertEqual(all_outbox[0].status, "retry")
+
+    async def test_dead_letter_when_attempts_exhausted(self) -> None:
+        self.exchange.set_retry_policy("default", max_attempts=1)
+        self.adapter.fail_next_send = True
+        outbound = Message(
+            id="out-dead",
+            session_id="s5",
+            from_instance="default",
+            sender=Sender(platform_id="bot", name="Bot", is_bot=True),
+            ts=datetime.now(UTC),
+            to=["u9"],
+            text="dead letter case",
+        )
+        await self.exchange.enqueue_outbound("default", outbound)
+        await self.exchange.flush_outbox()
+        dead_letters = await self.memory.list_dead_letters()
+        self.assertEqual(len(dead_letters), 1)
+        self.assertEqual(dead_letters[0].message.id, "out-dead")

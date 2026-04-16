@@ -20,6 +20,7 @@ ASGI routes and CLI commands.
 - ASGI app: `UnigateASGIApp`
 - routes: `/{mount_prefix}/webhook/{instance}`, `/{mount_prefix}/status`, `/{mount_prefix}/health`
 - CLI: `unigate serve|status|instances|inbox|outbox`
+  - outbox ops include `list`, `retry`, and `dead-letters`
 
 ## Development
 
