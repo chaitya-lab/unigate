@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from unigate import Exchange, Message, NamespacedSecureStore, TelegramChannel
-from unigate.channels import WebUIChannel
+from unigate.plugins import WebUIChannel
 from unigate.message import Interactive
 from unigate.stores import InMemoryStores
 

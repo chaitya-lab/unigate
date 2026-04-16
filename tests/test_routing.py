@@ -6,8 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 from unigate.message import Message, Sender
-from unigate.routing import RoutingEngine, RoutingRule, RuleMatcher
-from unigate.routing.rule import MatchCondition, RoutingAction
+from unigate.routing import MatchCondition, RoutingAction, RoutingEngine, RoutingRule, RuleMatcher, load_rules_from_config
 
 
 class FakeChannel:
@@ -165,16 +164,16 @@ class TestRoutingRule:
             group_id="support-team",
         )
         
-        assert rule.matches(msg) is True
+        assert rule.match_message(msg) is True
         
         # Different group
         msg.group_id = "random-chat"
-        assert rule.matches(msg) is False
+        assert rule.match_message(msg) is False
         
         # Different channel
         msg.from_instance = "email"
         msg.group_id = "support-team"
-        assert rule.matches(msg) is False
+        assert rule.match_message(msg) is False
 
 
 class TestRoutingEngine:
@@ -277,8 +276,6 @@ class TestLoadRulesFromConfig:
     """Tests for loading rules from config."""
     
     def test_load_rules(self):
-        from unigate.routing.rule import load_rules_from_config
-        
         config = {
             "routing": {
                 "rules": [
@@ -292,14 +289,11 @@ class TestLoadRulesFromConfig:
         rules = load_rules_from_config(config)
         
         assert len(rules) == 3
-        # Should be sorted by priority
         assert rules[0].name == "rule2"  # priority 50
         assert rules[1].name == "rule3"  # priority 75
         assert rules[2].name == "rule1"  # priority 100
     
     def test_empty_rules(self):
-        from unigate.routing.rule import load_rules_from_config
-        
         rules = load_rules_from_config({})
         assert len(rules) == 0
 

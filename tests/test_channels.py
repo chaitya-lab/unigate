@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from unigate import Message, Sender
-from unigate.channels import APIKeyWebChannel, BearerTokenWebChannel, TelegramChannel, WebChannel
+from unigate.plugins import APIKeyWebChannel, BearerTokenWebChannel, TelegramChannel, WebChannel
 from unigate.channel import RawRequest, SendResult
 from unigate.stores import NamespacedSecureStore
 
