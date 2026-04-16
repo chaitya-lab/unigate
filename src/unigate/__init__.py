@@ -3,6 +3,7 @@
 from .capabilities import ChannelCapabilities
 from .adapters import FakeWebhookAdapter, InternalAdapter
 from .channel import BaseChannel, KernelHandle, RawRequest, SecureStore, SendResult
+from .channels import APIKeyWebChannel, BearerTokenWebChannel, TelegramChannel, WebChannel
 from .cli import main
 from .config import load_config, load_yaml
 from .extensions import (
@@ -47,7 +48,9 @@ from .testing import FakeChannel, TestKit
 __all__ = [
     "__version__",
     "Action",
+    "APIKeyWebChannel",
     "BaseChannel",
+    "BearerTokenWebChannel",
     "ChannelCapabilities",
     "CircuitBreaker",
     "CircuitState",
@@ -96,9 +99,11 @@ __all__ = [
     "SetupResult",
     "SetupStatus",
     "SQLiteStores",
+    "TelegramChannel",
     "TestKit",
     "Unigate",
     "UnigateASGIApp",
+    "WebChannel",
     "main",
 ]
 
