@@ -1009,17 +1009,10 @@ instances:
                 try:
                     if hasattr(channel, "setup"):
                         asyncio.run(channel.setup())
-                    if hasattr(channel, "start"):
-                        asyncio.create_task(channel.start())
                 except Exception as e:
-                    print(f"Warning: Failed to start instance: {e}", file=sys.stderr)
+                    print(f"Warning: Failed to setup instance: {e}", file=sys.stderr)
             
-            # Start outbox flush loop
-            async def flush_loop():
-                while True:
-                    await asyncio.sleep(1)
-                    await exchange.flush_all_outbox()
-            asyncio.create_task(flush_loop())
+            # Note: channel.start() is called after uvicorn creates event loop in runtime.py
             
             try:
                 import uvicorn
