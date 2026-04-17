@@ -11,21 +11,14 @@ from typing import Any
 from .kernel import Exchange
 
 
-@asynccontextmanager
-async def lifespan(app):
-    await app.start()
-    yield
-    await app.stop()
-
-
 class UnigateApp:
     @asynccontextmanager
-    async def lifespan_context(self):
-        await self.start()
-        print("UnigateApp: All channels started!")
+    async def lifespan(self):
+        """Uvicorn lifespan - start/stop with event loop."""
+        # Do setup first (synchronous part done in CLI)
+        await self.start()  # This has event loop, so can create tasks
         yield
         await self.stop()
-        print("UnigateApp: Shutdown complete!")
 
     def __init__(
         self,
@@ -123,6 +116,10 @@ class UnigateApp:
                 break
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        # Handle lifespan protocol
+        if scope["type"] == "lifespan":
+            await self._handle_lifespan(receive, send)
+            return
         if scope["type"] != "http":
             await self._error(send, 404, "unsupported")
             return

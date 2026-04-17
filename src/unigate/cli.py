@@ -1016,7 +1016,8 @@ instances:
             
             try:
                 import uvicorn
-                uvicorn.run(app, host=host, port=port, log_level="info")
+                # Use uvicorn with lifespan - runtime.start() handles channel start
+                uvicorn.run(app, host=host, port=port, log_level="info", lifespan="on")
             except ImportError:
                 print("uvicorn not installed. Install with: pip install uvicorn")
                 return 1
