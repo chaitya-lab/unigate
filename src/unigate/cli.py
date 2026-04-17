@@ -1003,15 +1003,23 @@ instances:
                 if getattr(channel, "name", None) == "webui":
                     app.register_webui(instance_id, channel)
             
+            # Start channels (non-blocking)
             for inst in exchange.instances.values():
                 channel = inst.channel if hasattr(inst, "channel") else inst
                 try:
                     if hasattr(channel, "setup"):
                         asyncio.run(channel.setup())
                     if hasattr(channel, "start"):
-                        asyncio.run(channel.start())
+                        asyncio.create_task(channel.start())
                 except Exception as e:
                     print(f"Warning: Failed to start instance: {e}", file=sys.stderr)
+            
+            # Start outbox flush loop
+            async def flush_loop():
+                while True:
+                    await asyncio.sleep(1)
+                    await exchange.flush_all_outbox()
+            asyncio.create_task(flush_loop())
             
             try:
                 import uvicorn
