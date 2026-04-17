@@ -239,7 +239,10 @@ class TelegramChannel:
         if not self._token:
             return SendResult(success=False, error="not configured")
         try:
-            chat_id = msg.group_id or msg.session_id
+            default_chat_id = self.config.get("default_chat_id")
+            chat_id = msg.group_id or msg.session_id or default_chat_id
+            if not chat_id:
+                return SendResult(success=False, error="no chat_id - send to a known session or set default_chat_id")
             payload: dict[str, Any] = {
                 "chat_id": chat_id,
                 "text": msg.text or "",
