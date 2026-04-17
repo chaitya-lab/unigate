@@ -19,6 +19,8 @@ unigate.log
 .env.*
 .env
 unigate.yaml
+unigate_local.yaml
+local.yaml
 sessions/
 *.sock
 *.pid

@@ -1,0 +1,35 @@
+# Local Unigate config - DO NOT COMMIT THIS FILE WITH REAL TOKENS
+# Add to .gitignore: local.yaml
+
+unigate:
+  mount_prefix: /unigate
+
+storage:
+  backend: memory
+
+instances:
+  web:
+    type: webui
+
+  telegram:
+    type: telegram
+    token: !env:TELEGRAM_BOT_TOKEN
+    mode: polling
+    default_chat_id: YOUR_CHAT_ID
+
+routing:
+  default_action: keep
+  rules:
+    - name: web-to-telegram
+      priority: 100
+      match:
+        from_instance: web
+      actions:
+        forward_to: [telegram]
+    
+    - name: telegram-to-web
+      priority: 100
+      match:
+        from_instance: telegram
+      actions:
+        forward_to: [web]
