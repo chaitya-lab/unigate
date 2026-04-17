@@ -254,12 +254,12 @@ unigate dead-letters
 
 ## Runtime Interfaces
 
-### Unified Serve Command
+### Standalone Server
 
 Start all configured instances with unified HTTP routing:
 
 ```bash
-unigate serve --config unigate.yaml --port 8080
+unigate start --config unigate.yaml --port 8080
 ```
 
 Routes:
@@ -269,30 +269,31 @@ Routes:
 - `GET /{prefix}/web/{instance}` - Web UI for webui channels
 - `POST /{prefix}/webhook/{instance}` - Webhook for other channels
 
-### ASGI App
+### Embedded Mode
+
+Mount routes to an existing ASGI app:
 
 ```python
+from fastapi import FastAPI
 from unigate import Unigate
 
 gate = Unigate.from_config("unigate.yaml")
-app = gate.create_server_app(port=8080)
-```
-
-Or mount to existing ASGI app:
-
-```python
 gate.mount_to_app(app, prefix="/unigate")
+
+# Start with: unigate start --config /path/to/unigate.yaml
 ```
 
 ### CLI Commands
 
 ```bash
-unigate serve --config my.yaml          # Start unified server
-unigate plugins list                    # List plugins
-unigate instances list                  # List instances
-unigate inbox list                      # List inbox
-unigate outbox list                     # List outbox
-unigate dead-letters                   # View dead letters
+unigate start --config my.yaml    # Start server
+unigate start -f                 # Start in foreground
+unigate stop                     # Stop server
+unigate plugins list            # List plugins
+unigate instances list          # List instances
+unigate inbox list             # List inbox
+unigate outbox list            # List outbox
+unigate dead-letters           # View dead letters
 ```
 
 ## File Structure

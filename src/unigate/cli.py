@@ -513,8 +513,13 @@ Examples:
     # Start command
     start_parser = sub.add_parser(
         "start",
-        help="Start daemon in background",
-        description="Start the unigate daemon in background mode. Creates a PID file.",
+        help="Start unigate server",
+        description="Start the unigate server with HTTP routes and all configured instances.",
+    )
+    start_parser.add_argument(
+        "--config", "-c",
+        default="unigate.yaml",
+        help="Path to configuration file (default: unigate.yaml)",
     )
     start_parser.add_argument(
         "--foreground", "-f",
@@ -522,20 +527,30 @@ Examples:
         help="Run in foreground instead of background",
     )
     start_parser.add_argument(
-        "--backend",
-        choices=["memory", "sqlite", "file"],
-        default="memory",
-        help="Storage backend to use (default: memory)",
+        "--port", "-p",
+        type=int,
+        default=8080,
+        help="Port to listen on (default: 8080)",
+    )
+    start_parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Host to bind to (default: 0.0.0.0)",
+    )
+    start_parser.add_argument(
+        "--mount-prefix",
+        default="/unigate",
+        help="URL prefix for all routes (default: /unigate)",
     )
     start_parser.add_argument(
         "--storage-path",
-        help="Path for storage (SQLite db file or FileStores base directory)",
+        help="Path for storage (overrides config)",
     )
     start_parser.add_argument(
         "--retention",
         type=int,
         default=7,
-        help="Days to retain sent messages before cleanup (default: 7)",
+        help="Days to retain sent messages (default: 7)",
     )
     
     # Stop command
@@ -543,38 +558,6 @@ Examples:
         "stop",
         help="Stop running daemon",
         description="Stop the background daemon. Sends shutdown signal and cleans up.",
-    )
-    
-    # Serve command - unified server with all instances
-    serve_parser = sub.add_parser(
-        "serve",
-        help="Start unified server with all configured instances",
-        description="Start all instances from config file with unified HTTP routing",
-    )
-    serve_parser.add_argument(
-        "--config", "-c",
-        default="unigate.yaml",
-        help="Path to configuration file (default: unigate.yaml)",
-    )
-    serve_parser.add_argument(
-        "--port", "-p",
-        type=int,
-        default=8080,
-        help="Port to listen on (default: 8080)",
-    )
-    serve_parser.add_argument(
-        "--host",
-        default="0.0.0.0",
-        help="Host to bind to (default: 0.0.0.0)",
-    )
-    serve_parser.add_argument(
-        "--mount-prefix",
-        default="/unigate",
-        help="URL prefix for all routes (default: /unigate)",
-    )
-    serve_parser.add_argument(
-        "--handler",
-        help="Python module with handler function (e.g., 'my_handler:handle')",
     )
     
     # Cleanup command
@@ -950,43 +933,130 @@ Examples:
     
     # Handle commands
     if args.command == "start":
-        if socket_path.exists():
-            print("daemon already running", file=sys.stderr)
+        from .runtime import create_app
+        from .gate import Unigate
+        
+        config_path = args.config
+        if not Path(config_path).exists():
+            print(f"Config file not found: {config_path}", file=sys.stderr)
+            print("Creating default config...")
+            default_config = """# Unigate Configuration
+unigate:
+  mount_prefix: /unigate
+
+storage:
+  backend: memory
+
+instances:
+  web:
+    type: webui
+"""
+            Path(config_path).write_text(default_config)
+            print(f"Created: {config_path}")
+            print("Edit the config file and run 'unigate start' again")
             return 1
         
-        socket_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            gate = Unigate.from_config(config_path)
+        except Exception as e:
+            print(f"Failed to load config: {e}", file=sys.stderr)
+            return 1
         
-        # Use storage path from args or global option
-        storage_path = getattr(args, 'storage_path', None) or getattr(args, 'storage_path', None)
+        exchange = gate._exchange
+        storage_path = getattr(args, 'storage_path', None)
         retention = getattr(args, 'retention', 7)
+        host = getattr(args, 'host', '0.0.0.0')
+        port = getattr(args, 'port', 8080)
+        mount_prefix = getattr(args, 'mount_prefix', '/unigate')
         
         if args.foreground:
-            exchange, shutdown = _get_daemon_exchange(
-                storage_backend=args.backend,
-                storage_path=storage_path,
-                retention_days=retention,
-            )
-            print("Starting daemon in foreground... (Ctrl+C to stop)")
-            print(f"  Backend: {args.backend}")
-            if storage_path:
-                print(f"  Path: {storage_path}")
-            print(f"  Retention: {retention} days")
+            print(f"\n{'='*60}")
+            print("Unigate Server")
+            print(f"{'='*60}")
+            print(f"  Config: {config_path}")
+            print(f"  Server: http://{host}:{port}{mount_prefix}/")
+            print(f"\nRoutes:")
+            print(f"  GET  {mount_prefix}/status      - Status dashboard")
+            print(f"  GET  {mount_prefix}/health     - Health check")
+            print(f"  GET  {mount_prefix}/instances  - Instance list")
+            for instance_id, inst in exchange.instances.items():
+                channel = inst.channel if hasattr(inst, "channel") else inst
+                name = getattr(channel, "name", None)
+                if name == "webui":
+                    print(f"  GET  {mount_prefix}/web/{instance_id}    - Web UI")
+                else:
+                    print(f"  POST {mount_prefix}/webhook/{instance_id} - Webhook")
+            print(f"\nInstances:")
+            for instance_id, inst in exchange.instances.items():
+                channel = inst.channel if hasattr(inst, "channel") else inst
+                state = "active"
+                if hasattr(channel, "state"):
+                    s = channel.state
+                    state = s.value if hasattr(s, "value") else str(s)
+                print(f"  [{state}] {instance_id}")
+            print(f"\n{'='*60}")
+            print("Press Ctrl+C to stop\n")
+            
+            app = create_app(exchange=exchange, mount_prefix=mount_prefix, port=port)
+            for instance_id, inst in exchange.instances.items():
+                channel = inst.channel if hasattr(inst, "channel") else inst
+                if getattr(channel, "name", None) == "webui":
+                    app.register_webui(instance_id, channel)
+            
+            for inst in exchange.instances.values():
+                channel = inst.channel if hasattr(inst, "channel") else inst
+                try:
+                    if hasattr(channel, "setup"):
+                        asyncio.run(channel.setup())
+                    if hasattr(channel, "start"):
+                        asyncio.run(channel.start())
+                except Exception as e:
+                    print(f"Warning: Failed to start instance: {e}", file=sys.stderr)
+            
             try:
-                asyncio.run(_daemon_async(exchange, socket_path, shutdown))
+                import uvicorn
+                uvicorn.run(app, host=host, port=port, log_level="info")
+            except ImportError:
+                print("uvicorn not installed. Install with: pip install uvicorn")
+                return 1
             except KeyboardInterrupt:
-                shutdown.set()
+                print("\nShutting down...")
+            finally:
+                for inst in exchange.instances.values():
+                    channel = inst.channel if hasattr(inst, "channel") else inst
+                    try:
+                        if hasattr(channel, "stop"):
+                            asyncio.run(channel.stop())
+                    except Exception:
+                        pass
             return 0
         
-        exchange, shutdown = _get_daemon_exchange(
-            storage_backend=args.backend,
-            storage_path=storage_path,
-            retention_days=retention,
-        )
+        def run_server():
+            async def _run():
+                app = create_app(exchange=exchange, mount_prefix=mount_prefix, port=port)
+                for instance_id, inst in exchange.instances.items():
+                    channel = inst.channel if hasattr(inst, "channel") else inst
+                    if getattr(channel, "name", None) == "webui":
+                        app.register_webui(instance_id, channel)
+                
+                for inst in exchange.instances.values():
+                    channel = inst.channel if hasattr(inst, "channel") else inst
+                    try:
+                        if hasattr(channel, "setup"):
+                            await channel.setup()
+                        if hasattr(channel, "start"):
+                            await channel.start()
+                    except Exception:
+                        pass
+                
+                import uvicorn
+                config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+                server = uvicorn.Server(config)
+                await server.serve()
+            
+            asyncio.run(_run())
         
-        def run_daemon():
-            asyncio.run(_daemon_async(exchange, socket_path, shutdown))
-        
-        proc = ctx.Process(target=run_daemon, daemon=True)
+        proc = ctx.Process(target=run_server, daemon=True)
         proc.start()
         
         pid_path.parent.mkdir(parents=True, exist_ok=True)
@@ -994,15 +1064,23 @@ Examples:
         
         time.sleep(0.5)
         if proc.is_alive():
-            info = f"Daemon started (PID: {proc.pid})"
-            info += f", backend: {args.backend}"
-            if storage_path:
-                info += f", path: {storage_path}"
-            info += f", retention: {retention}d"
-            print(info)
+            print(f"Unigate started (PID: {proc.pid})")
+            print(f"  Config: {config_path}")
+            print(f"  Server: http://{host}:{port}{mount_prefix}/")
+            print(f"  Routes:")
+            print(f"    GET  {mount_prefix}/status     - Status")
+            print(f"    GET  {mount_prefix}/health    - Health")
+            print(f"    GET  {mount_prefix}/instances - Instances")
+            for instance_id, inst in exchange.instances.items():
+                channel = inst.channel if hasattr(inst, "channel") else inst
+                name = getattr(channel, "name", None)
+                if name == "webui":
+                    print(f"    GET  {mount_prefix}/web/{instance_id}  - Web UI")
+                else:
+                    print(f"    POST {mount_prefix}/webhook/{instance_id} - Webhook")
             return 0
         else:
-            print("Failed to start daemon", file=sys.stderr)
+            print("Failed to start unigate", file=sys.stderr)
             return 1
     
     if args.command == "stop":
@@ -1022,125 +1100,6 @@ Examples:
         
         socket_path.unlink(missing_ok=True)
         print("Daemon stopped")
-        return 0
-    
-    if args.command == "serve":
-        from .runtime import create_app
-        from .gate import Unigate
-        from .stores import NamespacedSecureStore
-        
-        config_path = args.config
-        if not Path(config_path).exists():
-            print(f"Config file not found: {config_path}", file=sys.stderr)
-            print("Creating default config...")
-            default_config = """# Unigate Configuration
-unigate:
-  mount_prefix: /unigate
-
-storage:
-  backend: memory
-
-instances:
-  web:
-    type: webui
-    port: 8080
-"""
-            Path(config_path).write_text(default_config)
-            print(f"Created: {config_path}")
-            print("Edit the config file and run 'unigate serve' again")
-            return 1
-        
-        try:
-            gate = Unigate.from_config(config_path)
-        except Exception as e:
-            print(f"Failed to load config: {e}", file=sys.stderr)
-            return 1
-        
-        exchange = gate._exchange
-        secure_store = NamespacedSecureStore()
-        
-        if args.handler:
-            try:
-                module_path, func_name = args.handler.split(":")
-                import importlib
-                module = importlib.import_module(module_path)
-                handler_func = getattr(module, func_name)
-                exchange.set_handler(handler_func)
-            except Exception as e:
-                print(f"Failed to load handler: {e}", file=sys.stderr)
-                return 1
-        
-        app = create_app(
-            exchange=exchange,
-            mount_prefix=args.mount_prefix,
-            port=args.port,
-        )
-        
-        for instance_id, inst in exchange.instances.items():
-            channel = inst.channel if hasattr(inst, "channel") else inst
-            if getattr(channel, "name", None) == "webui":
-                app.register_webui(instance_id, channel)
-        
-        for inst in exchange.instances.values():
-            channel = inst.channel if hasattr(inst, "channel") else inst
-            try:
-                if hasattr(channel, "setup"):
-                    asyncio.run(channel.setup())
-                if hasattr(channel, "start"):
-                    asyncio.run(channel.start())
-            except Exception as e:
-                print(f"Warning: Failed to start instance: {e}", file=sys.stderr)
-        
-        print(f"\n{'='*60}")
-        print("Unigate Unified Server")
-        print(f"{'='*60}")
-        print(f"  Config: {config_path}")
-        print(f"  Mount:  {args.mount_prefix}")
-        print(f"  Server: http://{args.host}:{args.port}{args.mount_prefix}/")
-        print(f"\nRoutes:")
-        print(f"  GET  {args.mount_prefix}/status      - Status dashboard")
-        print(f"  GET  {args.mount_prefix}/health     - Health check")
-        print(f"  GET  {args.mount_prefix}/instances  - Instance list")
-        for instance_id, inst in exchange.instances.items():
-            channel = inst.channel if hasattr(inst, "channel") else inst
-            name = getattr(channel, "name", None)
-            if name == "webui":
-                print(f"  GET  {args.mount_prefix}/web/{instance_id}    - Web UI")
-            else:
-                print(f"  POST {args.mount_prefix}/webhook/{instance_id} - Webhook")
-        print(f"\nInstances:")
-        for instance_id, inst in exchange.instances.items():
-            channel = inst.channel if hasattr(inst, "channel") else inst
-            state = "active"
-            if hasattr(channel, "state"):
-                s = channel.state
-                state = s.value if hasattr(s, "value") else str(s)
-            print(f"  [{state}] {instance_id}")
-        print(f"\n{'='*60}")
-        print("Press Ctrl+C to stop\n")
-        
-        try:
-            import uvicorn
-            uvicorn.run(
-                app,
-                host=args.host,
-                port=args.port,
-                log_level="info",
-            )
-        except ImportError:
-            print("uvicorn not installed. Install with: pip install uvicorn")
-            return 1
-        except KeyboardInterrupt:
-            print("\nShutting down...")
-        finally:
-            for inst in exchange.instances.values():
-                channel = inst.channel if hasattr(inst, "channel") else inst
-                try:
-                    if hasattr(channel, "stop"):
-                        asyncio.run(channel.stop())
-                except Exception:
-                    pass
-        
         return 0
     
     if args.command == "status":

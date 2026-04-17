@@ -115,6 +115,12 @@
 
 ## Deferred (Phase 4+)
 
+### HTTP Management API Extension
+- [ ] HTTP management API for embedded mode CLI support
+- [ ] Allows `unigate` CLI to manage instances in embedded mode
+- [ ] Endpoints: POST /manage/start, /manage/stop, /manage/enable, /manage/disable
+- [ ] GET /manage/status for instance state
+
 ### External Adapters
 - WhatsApp Cloud API
 - Discord (webhook + bot)

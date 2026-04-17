@@ -64,11 +64,17 @@ routing:
 ### 2. Start Server
 
 ```powershell
-# Start all configured instances with unified routing
-unigate serve --config unigate.yaml --port 8080
+# Start server with all configured instances (background)
+unigate start --config unigate.yaml --port 8080
 
 # Or use defaults (looks for unigate.yaml in current directory)
-unigate serve
+unigate start
+
+# Start in foreground (Ctrl+C to stop)
+unigate start -f
+
+# Start with custom mount prefix
+unigate start --mount-prefix /messages
 ```
 
 ### 3. Access Routes
@@ -83,7 +89,24 @@ All instances share a single port with unified routing:
 | `GET /unigate/web/{name}` | Web UI for webui channels |
 | `POST /unigate/webhook/{name}` | Webhook for other channels |
 
-Open `http://localhost:8080/unigate/web/web_ui/` to access the Web UI.
+Open `http://localhost:8080/unigate/web/web/` to access the Web UI.
+
+### 4. Embedded Mode
+
+Mount unigate routes to an existing ASGI app:
+
+```python
+from fastapi import FastAPI
+from unigate import Unigate
+
+app = FastAPI()
+gate = Unigate.from_config("unigate.yaml")
+gate.mount_to_app(app, prefix="/messages")
+
+# Start with: unigate start --config /path/to/unigate.yaml
+```
+
+Routes will be available at `/messages/status`, `/messages/web/{name}`, etc.
 
 ## Plugin System
 
@@ -217,11 +240,13 @@ routing:
 ## CLI Commands
 
 ```powershell
-# Serve - Unified server with all configured instances
-unigate serve                           # Start with unigate.yaml
-unigate serve --config my.yaml         # Custom config
-unigate serve --port 9000              # Custom port
-unigate serve --mount-prefix /api      # Custom mount prefix
+# Server operations
+unigate start                          # Start server (background)
+unigate start -f                       # Start in foreground
+unigate start --config my.yaml         # Custom config
+unigate start --port 9000              # Custom port
+unigate start --mount-prefix /api     # Custom mount prefix
+unigate stop                           # Stop server
 
 # Plugin management
 unigate plugins list                    # List all plugins
