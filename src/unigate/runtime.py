@@ -4,13 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
 from .kernel import Exchange
 
 
+@asynccontextmanager
+async def lifespan(app):
+    await app.start()
+    yield
+    await app.stop()
+
+
 class UnigateApp:
+    @asynccontextmanager
+    async def lifespan_context(self):
+        await self.start()
+        print("UnigateApp: All channels started!")
+        yield
+        await self.stop()
+        print("UnigateApp: Shutdown complete!")
 
     def __init__(
         self,
@@ -23,10 +38,36 @@ class UnigateApp:
         self.port = port
         self._health_task: asyncio.Task | None = None
         self._cleanup_task: asyncio.Task | None = None
+        self._outbox_task: asyncio.Task | None = None
         self._webui_channels: dict[str, Any] = {}
 
     async def start(self) -> None:
-        """Start background tasks."""
+        """Start background tasks and setup all channels."""
+        for instance_id, inst in self.exchange.instances.items():
+            channel = inst.channel if hasattr(inst, "channel") else inst
+            if hasattr(channel, 'setup'):
+                try:
+                    result = await channel.setup()
+                    print(f"[UNIGATE] Setup {instance_id}")
+                except Exception as e:
+                    print(f"[UNIGATE] Setup {instance_id} failed: {e}")
+        
+        # Start background tasks (non-blocking)
+        if hasattr(self.exchange, 'start_health_check_loop'):
+            self._health_task = asyncio.create_task(
+                self.exchange.start_health_check_loop(60.0)
+            )
+        
+        # Start channels in background
+        for instance_id, inst in self.exchange.instances.items():
+            channel = inst.channel if hasattr(inst, "channel") else inst
+            if hasattr(channel, 'start'):
+                try:
+                    asyncio.create_task(channel.start())
+                    print(f"[UNIGATE] Started {instance_id}")
+                except Exception as e:
+                    print(f"[UNIGATE] Start {instance_id} failed: {e}")
+        
         if hasattr(self.exchange, 'start_health_check_loop'):
             if self._health_task is None:
                 self._health_task = asyncio.create_task(
@@ -37,6 +78,10 @@ class UnigateApp:
                 self._cleanup_task = asyncio.create_task(
                     self.exchange.start_cleanup_task()
                 )
+        if hasattr(self.exchange, 'start_outbox_flush_loop'):
+            if self._outbox_task is None:
+                self.exchange.start_outbox_flush_loop(1.0)
+                self._outbox_task = self.exchange._outbox_flush_task
 
     async def stop(self) -> None:
         """Stop background tasks."""
@@ -54,10 +99,28 @@ class UnigateApp:
             except asyncio.CancelledError:
                 pass
             self._cleanup_task = None
+        if self._outbox_task:
+            self._outbox_task.cancel()
+            try:
+                await self._outbox_task
+            except asyncio.CancelledError:
+                pass
+            self._outbox_task = None
 
     def register_webui(self, instance_id: str, channel: Any) -> None:
         """Register a webui channel for serving."""
         self._webui_channels[instance_id] = channel
+
+    async def _handle_lifespan(self, receive: Any, send: Any) -> None:
+        while True:
+            message = await receive()
+            if message["type"] == "lifespan.startup":
+                await self.start()
+                await send({"type": "lifespan.startup.complete"})
+            elif message["type"] == "lifespan.shutdown":
+                await self.stop()
+                await send({"type": "lifespan.shutdown.complete"})
+                break
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope["type"] != "http":
@@ -245,7 +308,8 @@ def create_app(
     port: int = 8080,
 ) -> UnigateApp:
     """Create a Unigate ASGI app."""
-    return UnigateApp(exchange, mount_prefix, port)
+    app = UnigateApp(exchange, mount_prefix, port)
+    return app
 
 
 UnigateASGIApp = UnigateApp

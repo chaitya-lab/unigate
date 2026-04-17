@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import aiohttp
 import asyncio
 import json
 from typing import Any, ClassVar
-from urllib.request import Request, urlopen
 
 from ..capabilities import ChannelCapabilities
 from ..channel import BaseChannel, RawRequest, SendResult
@@ -129,21 +129,21 @@ class TelegramChannel:
             except asyncio.CancelledError:
                 break
             except Exception:
-                await asyncio.sleep(5)
+                await asyncio.sleep(1)
                 continue
 
     async def _get_updates(self) -> list[dict[str, Any]]:
         if not self._token:
             return []
         url = f"{self.BASE_URL}/bot{self._token}/getUpdates"
-        params = f"?offset={self._offset}&timeout=55&allowed_updates=message,edited_message,callback_query"
+        params = f"?offset={self._offset}&timeout=5&allowed_updates=message"
         try:
-            req = Request(url + params)
-            with urlopen(req, timeout=60) as response:
-                data = json.loads(response.read().decode())
-                if data.get("ok"):
-                    return data.get("result", [])
-        except Exception:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url + params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    data = await response.json()
+                    if data.get("ok"):
+                        return data.get("result", [])
+        except Exception as e:
             pass
         return []
 
@@ -240,7 +240,7 @@ class TelegramChannel:
             return SendResult(success=False, error="not configured")
         try:
             default_chat_id = self.config.get("default_chat_id")
-            chat_id = msg.group_id or msg.session_id or default_chat_id
+            chat_id = default_chat_id or msg.group_id or msg.session_id
             if not chat_id:
                 return SendResult(success=False, error="no chat_id - send to a known session or set default_chat_id")
             payload: dict[str, Any] = {
@@ -248,7 +248,10 @@ class TelegramChannel:
                 "text": msg.text or "",
             }
             if msg.reply_to_id:
-                payload["reply_to_message_id"] = int(msg.reply_to_id)
+                try:
+                    payload["reply_to_message_id"] = int(msg.reply_to_id)
+                except (ValueError, TypeError):
+                    pass
             if msg.actions:
                 for action in msg.actions:
                     if action.type == "typing_on":
@@ -274,12 +277,13 @@ class TelegramChannel:
             return {"ok": False, "error": "no token"}
         url = f"{self.BASE_URL}/bot{self._token}/{method}"
         try:
-            if data is not None:
-                req = Request(url, data=json.dumps(data).encode(), headers={"Content-Type": "application/json"})
-            else:
-                req = Request(url)
-            with urlopen(req, timeout=30) as response:
-                return json.loads(response.read().decode())
+            async with aiohttp.ClientSession() as session:
+                if data is not None:
+                    async with session.post(url, json=data, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                        return await response.json()
+                else:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                        return await response.json()
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

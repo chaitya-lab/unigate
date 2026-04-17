@@ -396,6 +396,8 @@ class WebUIChannel:
             )
         
         if self.kernel:
+            print(f"[WEBUI] Ingesting: {raw.get('text')}")
+            print(f"[WEBUI] Kernel id: {id(self.kernel)}")
             await self.kernel.ingest(self.instance_id, {
                 "id": msg.id,
                 "session_id": raw.get("session_id", msg.session_id),
@@ -408,6 +410,12 @@ class WebUIChannel:
                 "interactive_response": raw.get("interactive_response"),
                 "ts": raw.get("ts"),
             })
+            outbox = await self.kernel._outbox.list_outbox(limit=10)
+            print(f"[WEBUI] Outbox: {len(outbox)} messages")
+            for o in outbox:
+                print(f"[WEBUI]   -> {o.destination}: {o.message.text}")
+            flushed = await self.kernel.flush_all_outbox()
+            print(f"[WEBUI] Flushed: {flushed}")
         
         self._pending.append({
             "id": msg.id,
