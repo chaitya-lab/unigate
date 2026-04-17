@@ -94,6 +94,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     
     <script>
         const instanceId = "{instance_id}";
+        const webPath = "{web_path}";
         const sessionId = localStorage.getInstanceId || (localStorage.setInstanceId = "{session_id}");
         let lastPoll = 0;
         
@@ -103,7 +104,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (!text) return;
             input.value = '';
             
-            await fetch(`/${{instanceId}}/send`, {{
+            await fetch(`${webPath}/send`, {{
                 method: 'POST',
                 headers: {{ 'Content-Type': 'application/json' }},
                 body: JSON.stringify({{ text, session_id: sessionId }})
@@ -112,7 +113,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }}
         
         async function sendInteractive() {{
-            await fetch(`/${{instanceId}}/send`, {{
+            await fetch(`${webPath}/send`, {{
                 method: 'POST',
                 headers: {{ 'Content-Type': 'application/json' }},
                 body: JSON.stringify({{ 
@@ -131,7 +132,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         async function sendGroup() {{
             const text = prompt('Enter message for group:') || 'Hello from group!';
-            await fetch(`/${{instanceId}}/send`, {{
+            await fetch(`${webPath}/send`, {{
                 method: 'POST',
                 headers: {{ 'Content-Type': 'application/json' }},
                 body: JSON.stringify({{ 
@@ -146,7 +147,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         async function poll() {{
             try {{
-                const res = await fetch(`/${{instanceId}}/poll?since=` + lastPoll);
+                const res = await fetch(`${webPath}/poll?since=` + lastPoll);
                 const data = await res.json();
                 lastPoll = data.timestamp;
                 
@@ -198,7 +199,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }}
         
         async function respondInteractive(messageId, value) {{
-            await fetch(`/${{instanceId}}/send`, {{
+            await fetch(`${webPath}/send`, {{
                 method: 'POST',
                 headers: {{ 'Content-Type': 'application/json' }},
                 body: JSON.stringify({{ 
@@ -334,7 +335,10 @@ class WebUIChannel:
 
     async def _serve_ui(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         from datetime import datetime, timezone
+        
+        mount_prefix = self.config.get("mount_prefix", "/unigate")
         session_id = f"{self.instance_id}:web:{uuid4().hex[:8]}"
+        web_path = f"{mount_prefix}/web/{self.instance_id}"
         
         class SafeDict(dict):
             def __getitem__(self, key):
@@ -346,6 +350,7 @@ class WebUIChannel:
         html = HTML_TEMPLATE.format_map(SafeDict({
             "instance_id": self.instance_id,
             "session_id": session_id,
+            "web_path": web_path,
         }))
         
         await send({
@@ -359,12 +364,20 @@ class WebUIChannel:
         })
 
     async def _handle_send(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
-        body = await receive()
-        if isinstance(body, dict):
-            raw = body.get("body", {})
-        else:
-            body_bytes = body.get("body", b"")
-            raw = json.loads(body_bytes.decode())
+        body_bytes = b""
+        while True:
+            event = await receive()
+            if event["type"] == "http.request":
+                body_bytes += event.get("body", b"")
+                if not event.get("more_body", False):
+                    break
+        
+        raw = {}
+        if body_bytes:
+            try:
+                raw = json.loads(body_bytes.decode())
+            except json.JSONDecodeError:
+                pass
         
         msg = self.to_message(raw)
         
@@ -395,6 +408,16 @@ class WebUIChannel:
                 "interactive_response": raw.get("interactive_response"),
                 "ts": raw.get("ts"),
             })
+        
+        self._pending.append({
+            "id": msg.id,
+            "text": raw.get("text"),
+            "sender_name": "You",
+            "direction": "outgoing",
+            "timestamp": __import__('time').time(),
+            "interactive": None,
+            "group_id": raw.get("group_id"),
+        })
         
         await send({
             "type": "http.response.start",

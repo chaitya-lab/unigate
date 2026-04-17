@@ -49,6 +49,7 @@ class WebChannel:
     """Generic HTTP webhook channel with per-instance auth."""
 
     name = "web"
+    type = "channel"
     transport = "http"
     auth_method = "api_key"
 

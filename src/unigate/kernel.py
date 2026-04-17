@@ -67,6 +67,8 @@ class Exchange:
         self._tasks: set[asyncio.Task] = set()
         self._health_check_task: asyncio.Task | None = None
         self._cleanup_task: asyncio.Task | None = None
+        self._outbox_flush_task: asyncio.Task | None = None
+        self._outbox_flush_interval = 1.0
         self._cleanup_interval = cleanup_interval_seconds
         self._default_storage = default_storage or StorageConfig(backend="memory")
         self.instance_manager = InstanceManager()
@@ -527,6 +529,13 @@ class Exchange:
             except Exception:
                 pass
 
+    async def start_health_check_loop(self, interval_seconds: float = 60.0) -> None:
+        """Start the background health check task."""
+        if self._health_check_task is None or self._health_check_task.done():
+            self._health_check_task = asyncio.create_task(
+                self.health_check_loop(interval_seconds)
+            )
+
     async def start_cleanup_task(self) -> None:
         """Start the background cleanup task."""
         if self._cleanup_task is None or self._cleanup_task.done():
@@ -537,6 +546,33 @@ class Exchange:
         if hasattr(self._outbox, 'auto_cleanup'):
             return await self._outbox.auto_cleanup()
         return 0
+
+    async def outbox_flush_loop(self, interval_seconds: float = 1.0) -> None:
+        """Background task that periodically flushes the outbox."""
+        while True:
+            await asyncio.sleep(interval_seconds)
+            try:
+                await self._flush_all_instances_outbox()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    async def _flush_all_instances_outbox(self) -> None:
+        """Flush outbox for all active instances."""
+        try:
+            flushed = await self.flush_all_outbox()
+            if flushed > 0:
+                print(f"Flushed {flushed} outbox messages")
+        except Exception as e:
+            print(f"Outbox flush error: {e}")
+
+    def start_outbox_flush_loop(self, interval_seconds: float = 1.0) -> None:
+        """Start the background outbox flush task."""
+        if self._outbox_flush_task is None or self._outbox_flush_task.done():
+            self._outbox_flush_task = asyncio.create_task(
+                self.outbox_flush_loop(interval_seconds)
+            )
 
     async def shutdown(self, timeout: float = 30.0) -> None:
         """
@@ -565,6 +601,14 @@ class Exchange:
         
         # Flush pending outbox messages
         await self.flush_outbox()
+        
+        # Stop outbox flush loop
+        if self._outbox_flush_task and not self._outbox_flush_task.done():
+            self._outbox_flush_task.cancel()
+            try:
+                await self._outbox_flush_task
+            except asyncio.CancelledError:
+                pass
         
         # Stop all running channel tasks
         stop_tasks = []
@@ -639,6 +683,40 @@ class Exchange:
                         KernelEvent(
                             name="outbox.sent",
                             payload={"outbox_id": record.outbox_id, "instance_id": instance_id},
+                        )
+                    )
+                else:
+                    runtime.record_failure()
+            except Exception as exc:
+                runtime.record_failure()
+        
+        return flushed
+
+    async def flush_all_outbox(self) -> int:
+        """Flush all pending outbox messages regardless of destination."""
+        now = datetime.now(UTC)
+        due_records = await self._outbox.due(now, limit=1000)
+        flushed = 0
+        
+        for record in due_records:
+            runtime = self.instance_manager.instances.get(record.destination)
+            if runtime is None:
+                await self._outbox.move_to_dead_letter(record.outbox_id, f"destination '{record.destination}' not found")
+                continue
+            
+            if not runtime.can_execute():
+                continue
+            
+            try:
+                result = await runtime.channel.from_message(record.message)
+                if result.success:
+                    await self._outbox.mark_sent(record.outbox_id)
+                    runtime.record_success()
+                    flushed += 1
+                    await self.emit_event(
+                        KernelEvent(
+                            name="outbox.sent",
+                            payload={"outbox_id": record.outbox_id, "destination": record.destination},
                         )
                     )
                 else:

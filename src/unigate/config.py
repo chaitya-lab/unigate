@@ -21,6 +21,14 @@ def _interpolate_env(value: str | None) -> str | None:
     return value
 
 
+def _preprocess_yaml(content: str) -> str:
+    """Pre-process YAML content to replace !env:VAR with actual values."""
+    def replace_env(match):
+        var_name = match.group(1)
+        return os.environ.get(var_name, "")
+    return re.sub(ENV_PATTERN, replace_env, content)
+
+
 def _process_config(obj: Any) -> Any:
     """Recursively process config dict/list to interpolate env vars."""
     if isinstance(obj, dict):
@@ -41,5 +49,7 @@ def load_yaml(path: str) -> dict[str, Any]:
     """Load configuration from a YAML file."""
     import yaml
     with open(path) as f:
-        config = yaml.safe_load(f)
-    return load_config(config)
+        content = f.read()
+    content = _preprocess_yaml(content)
+    config = yaml.safe_load(content)
+    return _process_config(config)

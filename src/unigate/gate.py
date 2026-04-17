@@ -126,6 +126,10 @@ class Unigate:
                 retry_max_seconds=retry_config.get("max_delay_seconds", 30),
             )
         gate = cls(exchange=exchange, mount_prefix=cfg.get("unigate", {}).get("mount_prefix", "/unigate"))
+        
+        if cfg.get("routing"):
+            exchange.setup_routing(cfg)
+        
         for ext_config in cfg.get("extensions", []):
             from . import extensions as extensions_module
             ext = extensions_module.create_extension(ext_config)

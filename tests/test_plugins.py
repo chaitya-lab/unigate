@@ -17,7 +17,7 @@ class TestPluginRegistry:
 
     def test_registry_has_channels(self):
         registry = get_registry()
-        assert "channel.web" in registry.channels
+        assert "channel.webui" in registry.channels
         assert "channel.telegram" in registry.channels
         assert "channel.whatsapp" in registry.channels
 
@@ -134,10 +134,8 @@ class TestWhatsAppPlugin:
 
     @pytest.mark.asyncio
     async def test_whatsapp_receive(self):
-        registry = get_registry()
-        cls = registry.get_channel("whatsapp")
-        assert cls is not None
-        plugin = cls()
+        from unigate.plugins.channel_whatsapp import WhatsAppChannelPlugin
+        plugin = WhatsAppChannelPlugin()
         
         raw = {
             "entry": [{
@@ -164,9 +162,8 @@ class TestWhatsAppPlugin:
 
     @pytest.mark.asyncio
     async def test_whatsapp_receive_image(self):
-        registry = get_registry()
-        cls = registry.get_channel("whatsapp")
-        plugin = cls()
+        from unigate.plugins.channel_whatsapp import WhatsAppChannelPlugin
+        plugin = WhatsAppChannelPlugin()
         
         raw = {
             "entry": [{

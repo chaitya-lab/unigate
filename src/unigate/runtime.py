@@ -27,14 +27,16 @@ class UnigateApp:
 
     async def start(self) -> None:
         """Start background tasks."""
-        if self._health_task is None:
-            self._health_task = asyncio.create_task(
-                self.exchange.health_check_loop(60.0)
-            )
-        if self._cleanup_task is None:
-            self._cleanup_task = asyncio.create_task(
-                self.exchange.cleanup_loop(3600.0)
-            )
+        if hasattr(self.exchange, 'start_health_check_loop'):
+            if self._health_task is None:
+                self._health_task = asyncio.create_task(
+                    self.exchange.start_health_check_loop(60.0)
+                )
+        if hasattr(self.exchange, 'start_cleanup_task'):
+            if self._cleanup_task is None:
+                self._cleanup_task = asyncio.create_task(
+                    self.exchange.start_cleanup_task()
+                )
 
     async def stop(self) -> None:
         """Stop background tasks."""
@@ -87,7 +89,7 @@ class UnigateApp:
             return
 
         web_prefix = f"{self.mount_prefix}/web/"
-        if path.startswith(web_prefix) and method == "GET":
+        if path.startswith(web_prefix):
             instance_id = path[len(web_prefix):].split("/")[0]
             await self._webui(instance_id, scope, receive, send)
             return

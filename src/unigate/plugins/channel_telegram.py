@@ -57,6 +57,7 @@ class TelegramChannel:
     """
 
     name: ClassVar[str] = "telegram"
+    type: ClassVar[str] = "channel"
     transport: ClassVar[str] = "http"
     auth_method: ClassVar[str] = "token"
 

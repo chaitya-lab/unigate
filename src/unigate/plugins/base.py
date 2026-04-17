@@ -359,9 +359,9 @@ def get_registry() -> PluginRegistry:
 
 def _load_builtins(registry: PluginRegistry) -> None:
     """Load built-in plugins."""
-    from .channel_web import WebChannelPlugin
-    from .channel_telegram import TelegramChannelPlugin
-    from .channel_whatsapp import WhatsAppChannelPlugin
+    from .channel_web import WebChannel
+    from .channel_telegram import TelegramChannel
+    from .channel_whatsapp import WhatsAppChannel
     from .channel_webui import WebUIChannel
     from .match_from import FromMatcher
     from .match_text import TextContainsMatcher, TextPatternMatcher
@@ -376,9 +376,9 @@ def _load_builtins(registry: PluginRegistry) -> None:
     from .transport_ftp import FTPTransport, SFTPTransport, FileTransport
     
     for cls in [
-        WebChannelPlugin,
-        TelegramChannelPlugin,
-        WhatsAppChannelPlugin,
+        WebChannel,
+        TelegramChannel,
+        WhatsAppChannel,
         WebUIChannel,
         FromMatcher,
         TextContainsMatcher,

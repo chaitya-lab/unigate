@@ -105,6 +105,7 @@ class WhatsAppChannel(BaseChannel):
     """
     
     name: ClassVar[str] = "whatsapp"
+    type: ClassVar[str] = "channel"
     transport: ClassVar[str] = "https"
     auth_method: ClassVar[str] = "token"
     

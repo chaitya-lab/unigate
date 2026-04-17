@@ -1056,6 +1056,7 @@ instances:
             
             asyncio.run(_run())
         
+        ctx = multiprocessing.get_context('spawn')
         proc = ctx.Process(target=run_server, daemon=True)
         proc.start()
         
