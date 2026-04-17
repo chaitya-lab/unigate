@@ -173,6 +173,12 @@ class Unigate:
             )
         prefix = prefix or self._mount_prefix
         asgi_app = create_app(self._exchange, mount_prefix=prefix)
+        
+        for instance_id, inst in self._exchange.instances.items():
+            channel = inst.channel if hasattr(inst, "channel") else inst
+            if getattr(channel, "name", None) == "webui":
+                asgi_app.register_webui(instance_id, channel)
+        
         if hasattr(app, "mount"):
             app.mount(prefix, asgi_app)
         return asgi_app
