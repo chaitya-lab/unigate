@@ -4,10 +4,18 @@
 
 Receive messages from any channel, apply routing rules, and forward to destinations with retry logic and circuit breakers.
 
+## Two Ways to Use
+
+### Standalone Mode
+Run unigate as its own HTTP server with all instances.
+
+### Embedded Mode
+Mount unigate into an existing ASGI app (FastAPI, etc.) and start instances with CLI.
+
 ## Features
 
-- **Plugin Architecture** - Flat structure with type-prefixed plugins (`channel.telegram`, `match.text_contains`, `transform.truncate`, `transport.http`)
-- **Rule-Based Routing** - YAML configuration for routing based on sender, content, group, time, etc.
+- **Plugin Architecture** - Flat structure with type-prefixed plugins
+- **Rule-Based Routing** - YAML configuration for sender, content, group, time, etc.
 - **Channel Lifecycle** - Instances support setup → active → degraded states
 - **Resilience** - Retry policies, circuit breakers, dead letter queue
 - **Multiple Channels** - Telegram, WhatsApp, Web, WebSocket, FTP, and more
@@ -31,7 +39,11 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-## Quick Start
+---
+
+## Standalone Mode
+
+Run unigate as its own server with HTTP routes and all instances.
 
 ### 1. Create Configuration
 
@@ -41,11 +53,10 @@ unigate:
   mount_prefix: /unigate
 
 instances:
-  web_ui:
+  web:
     type: webui
-    port: 8080
 
-  sales_bot:
+  telegram_bot:
     type: telegram
     token: !env:TELEGRAM_BOT_TOKEN
     mode: polling
@@ -53,51 +64,136 @@ instances:
 routing:
   default_action: keep
   rules:
-    - name: sales-routing
+    - name: from-web-to-telegram
       priority: 100
       match:
-        text_contains: "sales"
+        from_instance: web
       actions:
-        forward_to: [sales_bot]
+        forward_to: [telegram_bot]
 ```
 
 ### 2. Start Server
 
 ```powershell
-# Start server with all configured instances (background)
-unigate start --config unigate.yaml --port 8080
-
-# Or use defaults (looks for unigate.yaml in current directory)
+# Start server (background daemon)
 unigate start
 
 # Start in foreground (Ctrl+C to stop)
 unigate start -f
 
-# Start with custom mount prefix
-unigate start --mount-prefix /messages
+# Custom config and port
+unigate start --config my.yaml --port 9000
 ```
 
 ### 3. Access Routes
 
-All instances share a single port with unified routing:
+All instances share a single port:
 
 | Route | Description |
 |-------|-------------|
-| `GET /unigate/status` | Status dashboard with instance info |
+| `GET /unigate/status` | Status dashboard |
 | `GET /unigate/health` | Health check for load balancers |
-| `GET /unigate/instances` | List all instances with states |
-| `GET /unigate/web/{name}` | Web UI for webui channels |
-| `POST /unigate/webhook/{name}` | Webhook for other channels |
+| `GET /unigate/instances` | List all instances |
+| `GET /unigate/web/{name}` | Web UI |
+| `POST /unigate/webhook/{name}` | Webhook |
 
-Open `http://localhost:8080/unigate/web/web/` to access the Web UI.
+Open `http://localhost:8080/unigate/web/web/` for Web UI.
 
-### 4. Embedded Mode
+---
 
-Mount unigate routes to an existing ASGI app:
+## Embedded Mode
+
+Mount unigate into an existing ASGI app (FastAPI, Starlette, etc.).
+
+### 1. Create Your App
 
 ```python
+# myapp/main.py
 from fastapi import FastAPI
 from unigate import Unigate
+
+app = FastAPI(title="MyApp")
+
+gate = Unigate.from_config("unigate.yaml")
+gate.mount_to_app(app, prefix="/unigate")
+
+@app.get("/")
+async def root():
+    return {"message": "MyApp running with Unigate"}
+```
+
+### 2. Create Unigate Config
+
+```yaml
+# unigate.yaml
+unigate:
+  mount_prefix: /unigate
+
+instances:
+  web:
+    type: webui
+
+  telegram_bot:
+    type: telegram
+    token: !env:TELEGRAM_BOT_TOKEN
+    mode: polling
+```
+
+### 3. Start Your App
+
+```powershell
+# Run your app normally
+uvicorn myapp.main:app --port 8000
+
+# Instances are NOT started automatically
+# Start instances with CLI (from myapp directory):
+unigate start --config unigate.yaml
+```
+
+### 4. Access Routes
+
+Routes are available under your app's prefix:
+
+| Route | Description |
+|-------|-------------|
+| `GET /unigate/status` | Unigate status |
+| `GET /unigate/health` | Health check |
+| `GET /unigate/web/web/` | Web UI |
+
+**Note:** In embedded mode, the CLI connects via Unix socket to manage instances. Start the CLI from the directory containing `unigate.yaml`.
+
+---
+
+## Configuration
+
+### Config File Structure
+
+```yaml
+unigate:
+  mount_prefix: /unigate    # URL prefix for all routes
+
+storage:
+  backend: memory           # memory | sqlite | file
+  path: ./unigate.db       # Path for SQLite/File storage
+
+instances:
+  web:
+    type: webui            # Channel type
+    
+  telegram_bot:
+    type: telegram
+    token: !env:TELEGRAM_BOT_TOKEN
+
+routing:
+  default_action: keep      # keep | discard | forward
+  rules:
+    - name: my-rule
+      priority: 100
+      match:
+        from_instance: web
+      actions:
+        forward_to: [telegram_bot]
+```
 
 app = FastAPI()
 gate = Unigate.from_config("unigate.yaml")

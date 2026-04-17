@@ -247,53 +247,75 @@ States: `closed` → `open` → `half_open` → `closed`
 ### Dead Letter Queue
 
 Messages that exceed retry attempts go to dead letters:
+## Two Deployment Modes
 
-```
-unigate dead-letters
-```
+### Standalone Mode
 
-## Runtime Interfaces
-
-### Standalone Server
-
-Start all configured instances with unified HTTP routing:
+Run unigate as its own HTTP server with all instances:
 
 ```bash
 unigate start --config unigate.yaml --port 8080
 ```
 
-Routes:
-- `GET /{prefix}/status` - Status dashboard with instance info and stats
-- `GET /{prefix}/health` - Health check (for load balancers)
-- `GET /{prefix}/instances` - List all instances with states
-- `GET /{prefix}/web/{instance}` - Web UI for webui channels
-- `POST /{prefix}/webhook/{instance}` - Webhook for other channels
+- HTTP server starts automatically
+- All configured instances start automatically
+- CLI connects via Unix socket
 
 ### Embedded Mode
 
-Mount routes to an existing ASGI app:
+Mount unigate into an existing ASGI app:
 
 ```python
 from fastapi import FastAPI
 from unigate import Unigate
 
+app = FastAPI()
 gate = Unigate.from_config("unigate.yaml")
 gate.mount_to_app(app, prefix="/unigate")
 
-# Start with: unigate start --config /path/to/unigate.yaml
+# Start your app: uvicorn myapp:app
+# Start instances: unigate start --config unigate.yaml
+```
+
+- HTTP routes added to parent app
+- Instances NOT started automatically
+- CLI connects via Unix socket (from config directory)
+
+## Runtime Interfaces
+
+### Standalone Server
+
+```bash
+unigate start --config unigate.yaml --port 8080
+```
+
+Routes (under mount_prefix):
+- `GET /status` - Status dashboard
+- `GET /health` - Health check
+- `GET /instances` - Instance list
+- `GET /web/{name}` - Web UI
+- `POST /webhook/{name}` - Webhook
+
+### Embedded Mode
+
+```python
+gate.mount_to_app(app, prefix="/unigate")
+# Routes: /unigate/status, /unigate/web/{name}, etc.
 ```
 
 ### CLI Commands
 
 ```bash
-unigate start --config my.yaml    # Start server
-unigate start -f                 # Start in foreground
-unigate stop                     # Stop server
-unigate plugins list            # List plugins
-unigate instances list          # List instances
-unigate inbox list             # List inbox
-unigate outbox list            # List outbox
-unigate dead-letters           # View dead letters
+unigate start [--config path]  # Start server (HTTP + instances)
+unigate start -f              # Start in foreground
+unigate stop                   # Stop server
+unigate status                 # Show status
+unigate instances list         # List instances
+unigate instances enable <id>  # Enable instance
+unigate instances disable <id> # Disable instance
+unigate inbox list            # List inbox
+unigate outbox list          # List outbox
+unigate dead-letters          # View dead letters
 ```
 
 ## File Structure
