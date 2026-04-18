@@ -224,7 +224,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 """
 
 
-class WebUIChannel:
+class WebUIChannel(BaseChannel):
     name: ClassVar[str] = "webui"
     type: ClassVar[str] = "channel"
     transport: ClassVar[str] = "http"
@@ -319,6 +319,11 @@ class WebUIChannel:
                 "options": msg.interactive.options,
                 "type": msg.interactive.type,
             }
+        
+        # Cap pending list to prevent memory leak
+        if len(self._pending) > 200:
+            self._pending = self._pending[-200:]
+            
         return SendResult(success=True, provider_message_id=f"webui:{msg.id}")
 
     async def handle_web(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
@@ -396,8 +401,6 @@ class WebUIChannel:
             )
         
         if self.kernel:
-            print(f"[WEBUI] Ingesting: {raw.get('text')}")
-            print(f"[WEBUI] Kernel id: {id(self.kernel)}")
             await self.kernel.ingest(self.instance_id, {
                 "id": msg.id,
                 "session_id": raw.get("session_id", msg.session_id),
@@ -410,12 +413,7 @@ class WebUIChannel:
                 "interactive_response": raw.get("interactive_response"),
                 "ts": raw.get("ts"),
             })
-            outbox = await self.kernel._outbox.list_outbox(limit=10)
-            print(f"[WEBUI] Outbox: {len(outbox)} messages")
-            for o in outbox:
-                print(f"[WEBUI]   -> {o.destination}: {o.message.text}")
-            flushed = await self.kernel.flush_all_outbox()
-            print(f"[WEBUI] Flushed: {flushed}")
+            await self.kernel.flush_all_outbox()
         
         self._pending.append({
             "id": msg.id,
@@ -426,6 +424,10 @@ class WebUIChannel:
             "interactive": None,
             "group_id": raw.get("group_id"),
         })
+        
+        # Cap pending list
+        if len(self._pending) > 200:
+            self._pending = self._pending[-200:]
         
         await send({
             "type": "http.response.start",

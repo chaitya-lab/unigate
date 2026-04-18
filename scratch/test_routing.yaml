@@ -1,0 +1,34 @@
+# Unigate Config with Web and Telegram Routing
+unigate:
+  mount_prefix: /unigate
+
+storage:
+  backend: memory
+
+instances:
+  web:
+    type: webui
+
+  telegram:
+    type: telegram
+    token: !env:TELEGRAM_BOT_TOKEN
+    mode: polling
+
+routing:
+  default_action: keep
+  rules:
+    # Forward messages from Web to Telegram
+    - name: web-to-telegram
+      priority: 100
+      match:
+        from_instance: web
+      actions:
+        forward_to: [telegram]
+    
+    # Forward messages from Telegram to Web
+    - name: telegram-to-web
+      priority: 100
+      match:
+        from_instance: telegram
+      actions:
+        forward_to: [web]

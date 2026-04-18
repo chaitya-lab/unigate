@@ -1,0 +1,11 @@
+Loading config...
+Exchange loaded
+Outbox loop started
+Setting up...
+Setting up...
+All channels started
+App created
+==================================================
+SERVER READY!
+Web UI: http://localhost:8080/unigate/web/web
+==================================================

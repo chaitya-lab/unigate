@@ -49,7 +49,10 @@ class InstanceRuntime:
 
     def can_execute(self) -> bool:
         return self.circuit_breaker.can_execute()
-    
+
+    def is_disabled(self) -> bool:
+        return self.state is InstanceState.DISABLED
+
     def get_next_fallback(self, tried: set[str]) -> str | None:
         """Get next available fallback instance."""
         for fallback_id in self.fallback_instances:
@@ -147,6 +150,33 @@ class InstanceManager:
         runtime.state = InstanceState.UNCONFIGURED
         runtime.updated_at = datetime.now(UTC)
         runtime._notify_state_change(old_state, runtime.state.value)
+
+    async def disable(self, instance_id: str) -> None:
+        """Disable an instance — stops it and marks it as disabled."""
+        if instance_id not in self.instances:
+            raise KeyError(f"instance '{instance_id}' not found")
+        runtime = self.instances[instance_id]
+        old_state = runtime.state.value
+        if runtime.state is not InstanceState.DISABLED:
+            try:
+                await runtime.channel.stop()
+            except Exception:
+                pass  # best-effort stop
+            runtime.state = InstanceState.DISABLED
+            runtime.updated_at = datetime.now(UTC)
+            runtime._notify_state_change(old_state, runtime.state.value)
+
+    async def enable(self, instance_id: str) -> None:
+        """Re-enable a disabled instance — runs setup then start."""
+        if instance_id not in self.instances:
+            raise KeyError(f"instance '{instance_id}' not found")
+        runtime = self.instances[instance_id]
+        if runtime.state is InstanceState.DISABLED:
+            old_state = runtime.state.value
+            runtime.state = InstanceState.UNCONFIGURED
+            runtime.updated_at = datetime.now(UTC)
+            runtime._notify_state_change(old_state, runtime.state.value)
+        await self.ensure_started(instance_id)
 
     def status(self) -> dict[str, dict[str, Any]]:
         return {

@@ -16,6 +16,7 @@ class InstanceState(str, Enum):
     ACTIVE = "active"
     DEGRADED = "degraded"
     RECONNECTING = "reconnecting"
+    DISABLED = "disabled"
 
 
 class HealthStatus(str, Enum):

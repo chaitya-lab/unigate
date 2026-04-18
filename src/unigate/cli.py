@@ -119,7 +119,44 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
     
     if cmd == "instances":
         return _daemon_exchange.instance_manager.status()
-    
+
+    if cmd == "instances_enable":
+        instance_id = args.get("instance_id")
+        if not instance_id:
+            return {"error": "instance_id required"}
+        if instance_id not in _daemon_exchange.instances:
+            return {"error": f"instance '{instance_id}' not found"}
+        try:
+            await _daemon_exchange.enable_instance(instance_id)
+            return {"ok": True, "instance_id": instance_id, "action": "enabled"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    if cmd == "instances_disable":
+        instance_id = args.get("instance_id")
+        if not instance_id:
+            return {"error": "instance_id required"}
+        if instance_id not in _daemon_exchange.instances:
+            return {"error": f"instance '{instance_id}' not found"}
+        try:
+            await _daemon_exchange.disable_instance(instance_id)
+            return {"ok": True, "instance_id": instance_id, "action": "disabled"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    if cmd == "reload":
+        config_path = args.get("config_path", "unigate.yaml")
+        try:
+            import yaml
+            with open(config_path) as f:
+                new_config = yaml.safe_load(f)
+            await _daemon_exchange.reload_routing(new_config)
+            return {"ok": True, "config_path": config_path, "message": "Routing rules reloaded"}
+        except FileNotFoundError:
+            return {"error": f"config file not found: {config_path}"}
+        except Exception as e:
+            return {"error": str(e)}
+
     if cmd == "instances_health":
         results = {}
         for instance_id in _daemon_exchange.instances:
@@ -559,7 +596,19 @@ Examples:
         help="Stop running daemon",
         description="Stop the background daemon. Sends shutdown signal and cleans up.",
     )
-    
+
+    # Reload command
+    reload_parser = sub.add_parser(
+        "reload",
+        help="Reload routing rules (no restart)",
+        description="Re-read config and reload routing rules without restarting channels or the server.",
+    )
+    reload_parser.add_argument(
+        "--config", "-c",
+        default="unigate.yaml",
+        help="Config file to reload from (default: unigate.yaml)",
+    )
+
     # Cleanup command
     cleanup_parser = sub.add_parser(
         "cleanup",
@@ -1104,7 +1153,27 @@ instances:
         socket_path.unlink(missing_ok=True)
         print("Daemon stopped")
         return 0
-    
+
+    if args.command == "reload":
+        config_path = getattr(args, "config", "unigate.yaml")
+        if not socket_path.exists():
+            print("daemon not running — cannot reload. Use 'unigate start' first.", file=sys.stderr)
+            return 1
+        if not Path(config_path).exists():
+            print(f"Config file not found: {config_path}", file=sys.stderr)
+            return 1
+        response = send_daemon_command({
+            "command": "reload",
+            "args": {"config_path": config_path},
+        })
+        if response.get("ok"):
+            print(f"Reloaded: {response.get('message', 'done')}")
+            print(f"  Config: {config_path}")
+        else:
+            print(f"Error: {response.get('error', 'unknown')}", file=sys.stderr)
+            return 1
+        return 0
+
     if args.command == "status":
         if socket_path.exists():
             response = send_daemon_command({"command": "status"})
@@ -1186,14 +1255,64 @@ instances:
     # Commands that work with or without daemon
     if args.command == "instances":
         if socket_path.exists():
-            response = send_daemon_command({"command": "instances"})
-            print(json.dumps(response, indent=2))
+            if args.subcommand == "list":
+                response = send_daemon_command({"command": "instances"})
+                data = response if isinstance(response, dict) else {}
+                print(f"{'INSTANCE':<20} {'STATE':<15} {'CIRCUIT':<10} {'RETRIES':<8} {'UPDATED'}")
+                print("-" * 80)
+                for iid, info in data.items():
+                    print(f"{iid:<20} {info.get('state','?'):<15} {info.get('circuit_breaker_state','?'):<10} {info.get('retries',0):<8} {info.get('updated_at','?')[:19]}")
+            elif args.subcommand == "status":
+                response = send_daemon_command({"command": "instances"})
+                if getattr(args, 'instance_id', None):
+                    iid = args.instance_id
+                    if iid in response:
+                        print(json.dumps({iid: response[iid]}, indent=2))
+                    else:
+                        print(f"Instance '{iid}' not found", file=sys.stderr)
+                        return 1
+                else:
+                    print(json.dumps(response, indent=2))
+            elif args.subcommand == "enable":
+                response = send_daemon_command({
+                    "command": "instances_enable",
+                    "args": {"instance_id": args.instance_id},
+                })
+                if response.get("ok"):
+                    print(f"Enabled: {args.instance_id}")
+                else:
+                    print(f"Error: {response.get('error', 'unknown')}", file=sys.stderr)
+                    return 1
+            elif args.subcommand == "disable":
+                response = send_daemon_command({
+                    "command": "instances_disable",
+                    "args": {"instance_id": args.instance_id},
+                })
+                if response.get("ok"):
+                    print(f"Disabled: {args.instance_id}")
+                else:
+                    print(f"Error: {response.get('error', 'unknown')}", file=sys.stderr)
+                    return 1
+            else:
+                print(f"Unknown subcommand: {args.subcommand}", file=sys.stderr)
+                return 1
         else:
-            exchange = build_exchange(storage_backend=args.backend)
-            response = exchange.instance_manager.status()
-            print(json.dumps(response, indent=2))
+            # Without daemon, at least show what's in the exchange from config
+            if args.subcommand in ("list", "status"):
+                exchange = build_exchange(storage_backend=args.backend)
+                response = exchange.instance_manager.status()
+                if args.subcommand == "list":
+                    print(f"{'INSTANCE':<20} {'STATE':<15}")
+                    print("-" * 36)
+                    for iid, info in response.items():
+                        print(f"{iid:<20} {info.get('state','?'):<15}")
+                else:
+                    print(json.dumps(response, indent=2))
+            else:
+                print("daemon not running - start with 'unigate start' first", file=sys.stderr)
+                return 1
         return 0
-    
+
     if args.command == "inbox":
         if socket_path.exists():
             if args.subcommand == "list":

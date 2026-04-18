@@ -15,6 +15,7 @@ from .stores import FileStores, InMemoryStores, NamespacedSecureStore, SQLiteSto
 
 
 T = TypeVar("T")
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 class Unigate:
@@ -180,8 +181,8 @@ class Unigate:
         
         for instance_id, inst in self._exchange.instances.items():
             channel = inst.channel if hasattr(inst, "channel") else inst
-            if getattr(channel, "name", None) == "webui":
-                asgi_app.register_webui(instance_id, channel)
+            if hasattr(channel, "handle_web"):
+                asgi_app.register_web_handler(instance_id, channel)
         
         if hasattr(app, "mount"):
             app.mount(prefix, asgi_app)
@@ -201,8 +202,8 @@ class Unigate:
         
         for instance_id, inst in self._exchange.instances.items():
             channel = inst.channel if hasattr(inst, "channel") else inst
-            if getattr(channel, "name", None) == "webui":
-                app.register_webui(instance_id, channel)
+            if hasattr(channel, "handle_web"):
+                app.register_web_handler(instance_id, channel)
         
         return app
 

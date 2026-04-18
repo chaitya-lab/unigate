@@ -32,7 +32,7 @@ class UnigateApp:
         self._health_task: asyncio.Task | None = None
         self._cleanup_task: asyncio.Task | None = None
         self._outbox_task: asyncio.Task | None = None
-        self._webui_channels: dict[str, Any] = {}
+        self._web_handlers: dict[str, Any] = {}
 
     async def start(self) -> None:
         """Start background tasks and setup all channels."""
@@ -100,9 +100,9 @@ class UnigateApp:
                 pass
             self._outbox_task = None
 
-    def register_webui(self, instance_id: str, channel: Any) -> None:
-        """Register a webui channel for serving."""
-        self._webui_channels[instance_id] = channel
+    def register_web_handler(self, instance_id: str, channel: Any) -> None:
+        """Register a web handler (channel with handle_web) for serving."""
+        self._web_handlers[instance_id] = channel
 
     async def _handle_lifespan(self, receive: Any, send: Any) -> None:
         while True:
@@ -151,7 +151,7 @@ class UnigateApp:
         web_prefix = f"{self.mount_prefix}/web/"
         if path.startswith(web_prefix):
             instance_id = path[len(web_prefix):].split("/")[0]
-            await self._webui(instance_id, scope, receive, send)
+            await self._web_handler(instance_id, scope, receive, send)
             return
 
         await self._error(send, 404, "not_found")
@@ -256,12 +256,12 @@ class UnigateApp:
         status = await self.exchange.ingest(instance_id, raw)
         await self._json(send, 200, {"status": status})
 
-    async def _webui(self, instance_id: str, scope: dict[str, Any], receive: Any, send: Any) -> None:
-        if instance_id not in self._webui_channels:
-            await self._error(send, 404, f"webui '{instance_id}' not found")
+    async def _web_handler(self, instance_id: str, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if instance_id not in self._web_handlers:
+            await self._error(send, 404, f"web handler '{instance_id}' not found")
             return
 
-        channel = self._webui_channels[instance_id]
+        channel = self._web_handlers[instance_id]
         prefix = f"{self.mount_prefix}/web/{instance_id}"
         path = scope.get("path", "")
         if path.startswith(prefix):

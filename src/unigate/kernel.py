@@ -12,6 +12,7 @@ from .channel import BaseChannel
 from .extensions import EventExtension, ExtensionDecision, InboundExtension, OutboundExtension
 from .events import KernelEvent
 from .instance_manager import InstanceManager
+from .lifecycle import HealthStatus, InstanceState
 from .message import Message
 from .storage_config import StorageConfig, StorageFactory
 from .stores import (
@@ -24,6 +25,9 @@ from .stores import (
     PendingInteractionRecord,
     SessionStore,
 )
+
+if False:  # TYPE_CHECKING equivalent — avoids circular import
+    from .routing import RoutingEngine
 
 
 Handler = Callable[[Message], Awaitable[Message | list[Message] | None] | Message | list[Message] | None]
@@ -186,6 +190,10 @@ class Exchange:
         self._event_extensions.append(extension)
 
     async def ingest(self, instance_id: str, raw: dict[str, object]) -> str:
+        # Skip processing if instance is disabled
+        runtime = self.instance_manager.instances.get(instance_id)
+        if runtime and runtime.is_disabled():
+            return "disabled"
         async with self._lock:
             channel = self.instances[instance_id].channel
             message = channel.to_message(raw)
@@ -725,6 +733,30 @@ class Exchange:
                 runtime.record_failure()
         
         return flushed
+
+    async def disable_instance(self, instance_id: str) -> None:
+        """Disable an instance by name."""
+        await self.instance_manager.disable(instance_id)
+        await self.emit_event(
+            KernelEvent(name="instance.disabled", payload={"instance_id": instance_id})
+        )
+
+    async def enable_instance(self, instance_id: str) -> None:
+        """Enable a previously disabled instance."""
+        await self.instance_manager.enable(instance_id)
+        await self.emit_event(
+            KernelEvent(name="instance.enabled", payload={"instance_id": instance_id})
+        )
+
+    async def reload_routing(self, config: dict) -> None:
+        """Hot-reload routing rules from new config (no channel restart)."""
+        if self._routing_engine:
+            self._routing_engine.reload(config)
+        else:
+            self.setup_routing(config)
+        await self.emit_event(
+            KernelEvent(name="routing.reloaded", payload={"rules_count": len(self._routing_engine._rules) if self._routing_engine else 0})
+        )
 
     async def _flush_instance_when_ready(self, instance_id: str) -> None:
         """Wait for instance to be ready, then flush its outbox."""

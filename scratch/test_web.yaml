@@ -1,0 +1,13 @@
+# Unigate Config - Web only (Telegram will be tested separately)
+unigate:
+  mount_prefix: /unigate
+
+storage:
+  backend: memory
+
+instances:
+  web:
+    type: webui
+
+routing:
+  default_action: keep
