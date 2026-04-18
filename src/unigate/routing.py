@@ -330,7 +330,7 @@ class RoutingEngine:
                 continue
             name = ext_config.get("name")
             ext_type = ext_config.get("type")
-            if ext_type == "transform":
+            if ext_type in ("transform", "inline"):
                 self._extensions[name] = ext_config
 
     def find_matching_rule(self, message: Message) -> RoutingRule | None:
@@ -383,11 +383,11 @@ class RoutingEngine:
     async def _apply_extensions(self, message: Message, extension_names: list[str]) -> Message:
         result = message
         for ext_name in extension_names:
-            transform = self._plugin_registry.create_transform(ext_name)
-            if transform:
+            transform_plugin = self._plugin_registry.create_transform(ext_name)
+            if transform_plugin:
                 try:
                     config = self._extensions.get(ext_name, {}).get("config", {})
-                    result = await transform.transform(result, config)
+                    result = await transform_plugin.transform(result, config)
                 except Exception:
                     pass
                 continue
@@ -401,7 +401,8 @@ class RoutingEngine:
         return result
 
     async def _execute_extension(self, message: Message, ext_config: dict[str, Any]) -> Message:
-        transforms = ext_config.get("transforms", [])
+        inner_config = ext_config.get("config", ext_config)
+        transforms = inner_config.get("transforms", [])
         result = message
         for transform in transforms:
             if isinstance(transform, dict):

@@ -371,6 +371,7 @@ def _load_builtins(registry: PluginRegistry) -> None:
     from .transform_truncate import TruncateTransform
     from .transform_extract import ExtractSubjectTransform
     from .transform_add import AddMetadataTransform, AddTimestampTransform
+    from .transform_case import UppercaseTransform, LowercaseTransform, TitleCaseTransform
     from .transport_http import HTTPTransport
     from .transport_websocket import WebSocketTransport
     from .transport_ftp import FTPTransport, SFTPTransport, FileTransport
@@ -393,6 +394,9 @@ def _load_builtins(registry: PluginRegistry) -> None:
         ExtractSubjectTransform,
         AddMetadataTransform,
         AddTimestampTransform,
+        UppercaseTransform,
+        LowercaseTransform,
+        TitleCaseTransform,
         HTTPTransport,
         WebSocketTransport,
         FTPTransport,

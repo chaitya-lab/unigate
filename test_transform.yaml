@@ -1,0 +1,60 @@
+# Transform Test Config
+# Test: web1 -> web2 = uppercase + suffix, web2 -> web1 = lowercase + prefix
+
+unigate:
+  mount_prefix: /unigate
+
+storage:
+  backend: memory
+
+instances:
+  web1:
+    type: web
+  web2:
+    type: web
+
+extensions:
+  - name: uppercase
+    type: transform
+    config:
+      transform: uppercase
+
+  - name: lowercase
+    type: transform
+    config:
+      transform: lowercase
+
+  - name: add_prefix_web1
+    type: inline
+    config:
+      transforms:
+        - code: "msg.text = '[FROM_WEB1] ' + msg.text if msg.text else msg.text"
+
+  - name: add_suffix_web2
+    type: inline
+    config:
+      transforms:
+        - code: "msg.text = msg.text + ' [TO_WEB2]' if msg.text else msg.text"
+
+routing:
+  default_action: keep
+  rules:
+    - name: web1-to-web2
+      priority: 100
+      match:
+        from_instance: web1
+      actions:
+        forward_to: [web2]
+        extensions:
+          - uppercase
+          - add_suffix_web2
+
+    - name: web2-to-web1
+      priority: 100
+      match:
+        from_instance: web2
+      actions:
+        forward_to: [web1]
+        extensions:
+          - lowercase
+          - add_prefix_web1
