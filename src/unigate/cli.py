@@ -1063,28 +1063,55 @@ instances:
             
             # Note: channel.start() is called after uvicorn creates event loop in runtime.py
             
+            import signal
+            
+            def signal_handler(sig, frame):
+                print("\nShutting down...")
+                raise KeyboardInterrupt()
+            
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+            
             try:
                 import uvicorn
-                # Use uvicorn with lifespan - runtime.start() handles channel start
-                uvicorn.run(app, host=host, port=port, log_level="info", lifespan="on")
+                config = uvicorn.Config(app, host=host, port=port, log_level="info", lifespan="on")
+                server = uvicorn.Server(config)
+                server.run()
             except ImportError:
                 print("uvicorn not installed. Install with: pip install uvicorn")
                 return 1
             except KeyboardInterrupt:
-                print("\nShutting down...")
+                pass
             finally:
-                for inst in exchange.instances.values():
-                    channel = inst.channel if hasattr(inst, "channel") else inst
-                    try:
-                        if hasattr(channel, "stop"):
-                            asyncio.run(channel.stop())
-                    except Exception:
-                        pass
+                async def cleanup():
+                    for inst in exchange.instances.values():
+                        channel = inst.channel if hasattr(inst, "channel") else inst
+                        try:
+                            if hasattr(channel, "stop"):
+                                await channel.stop()
+                        except Exception:
+                            pass
+                asyncio.run(cleanup())
+            print("Server stopped")
             return 0
         
-        def run_server():
-            async def _run():
-                app = create_app(exchange=exchange, mount_prefix=mount_prefix, port=port)
+        from .runtime import create_app
+        import uvicorn
+        
+        _server_config = {
+            "config_path": config_path,
+            "host": host,
+            "port": port,
+            "mount_prefix": mount_prefix,
+        }
+        
+        def _run_daemon():
+            try:
+                gate = Unigate.from_config(_server_config["config_path"])
+                exchange = gate._exchange
+                
+                app = create_app(exchange=exchange, mount_prefix=_server_config["mount_prefix"], port=_server_config["port"])
+                
                 for instance_id, inst in exchange.instances.items():
                     channel = inst.channel if hasattr(inst, "channel") else inst
                     if getattr(channel, "name", None) == "webui":
@@ -1094,21 +1121,20 @@ instances:
                     channel = inst.channel if hasattr(inst, "channel") else inst
                     try:
                         if hasattr(channel, "setup"):
-                            await channel.setup()
+                            asyncio.run(channel.setup())
                         if hasattr(channel, "start"):
-                            await channel.start()
+                            asyncio.run(channel.start())
                     except Exception:
                         pass
                 
-                import uvicorn
-                config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+                config = uvicorn.Config(app, host=_server_config["host"], port=_server_config["port"], log_level="warning")
                 server = uvicorn.Server(config)
-                await server.serve()
-            
-            asyncio.run(_run())
+                asyncio.run(server.serve())
+            except Exception as e:
+                print(f"Daemon error: {e}")
         
         ctx = multiprocessing.get_context('spawn')
-        proc = ctx.Process(target=run_server, daemon=True)
+        proc = ctx.Process(target=_run_daemon, daemon=True)
         proc.start()
         
         pid_path.parent.mkdir(parents=True, exist_ok=True)
