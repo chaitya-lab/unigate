@@ -103,6 +103,10 @@ class UnigateApp:
     def register_web_handler(self, instance_id: str, channel: Any) -> None:
         """Register a web handler (channel with handle_web) for serving."""
         self._web_handlers[instance_id] = channel
+    
+    def register_webui(self, instance_id: str, channel: Any) -> None:
+        """Alias for register_web_handler."""
+        self._web_handlers[instance_id] = channel
 
     async def _handle_lifespan(self, receive: Any, send: Any) -> None:
         while True:
