@@ -135,6 +135,9 @@ class Unigate:
             exchange.setup_routing(cfg)
         
         for ext_config in cfg.get("extensions", []):
+            if isinstance(ext_config, dict) and ext_config.get("enabled") is False:
+                continue
+            
             from . import extensions as extensions_module
             ext = extensions_module.create_extension(ext_config)
             if ext:
