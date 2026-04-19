@@ -216,21 +216,62 @@ routing:
         forward_to: [support_telegram]
 ```
 
-### Route by Sender
+### Route by Sender (One Bot, Multiple Users)
+
+**The most common pattern: one Telegram bot, different users get different routing and transforms:**
+
+```yaml
+# One bot, different users -> different handling
+routing:
+  rules:
+    # Premium user gets uppercase + VIP channel
+    - name: premium-user
+      priority: 50
+      match:
+        from_instance: telegram           # From the bot
+        sender_id: "123456789"            # Premium user ID
+      actions:
+        forward_to: [web_premium]
+        extensions:
+          - uppercase
+          - add_prefix
+
+    # Regular user gets lowercase + regular channel
+    - name: regular-user
+      priority: 100
+      match:
+        from_instance: telegram
+        sender_id: "987654321"            # Regular user ID
+      actions:
+        forward_to: [web_regular]
+        extensions:
+          - lowercase
+
+    # Default for other users
+    - name: catch-all
+      priority: 200
+      match:
+        from_instance: telegram
+      actions:
+        forward_to: [web_standard]
+```
+
+**Using sender_pattern for groups of users:**
 
 ```yaml
 routing:
   rules:
+    # All VIP users (pattern matching)
     - name: vip-users
       priority: 50
       match:
-        sender_pattern: "vip_*"
+        sender_pattern: "vip_*"            # Users with ID starting "vip_"
       actions:
         forward_to: [vip_channel]
 
     - name: regular-users
       priority: 100
-      match: {}           # Matches everything
+      match: {}                           # Matches everything else
       actions:
         forward_to: [general_channel]
 ```
