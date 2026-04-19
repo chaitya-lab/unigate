@@ -88,6 +88,9 @@ class Unigate:
             from .plugins.base import register_plugin_dirs
             register_plugin_dirs(plugin_dirs)
         
+        from .config import filter_by_enabled
+        instance_manager = filter_by_enabled(instance_manager)
+        
         registry = get_registry()
         
         for instance_id, instance_config in instance_manager.items():

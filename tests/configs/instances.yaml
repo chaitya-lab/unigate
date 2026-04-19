@@ -1,0 +1,15 @@
+# Sample instances configuration for testing
+# Use with: Unigate.from_config('tests/configs/instances.yaml')
+
+instances:
+  web1:
+    type: web
+    enabled: true
+
+  web2:
+    type: web
+    enabled: false
+
+  telegram_bot:
+    type: telegram
+    enabled: false

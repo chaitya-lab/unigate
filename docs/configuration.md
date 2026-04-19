@@ -20,18 +20,107 @@ storage:
 instances:
   my_channel:
     type: channel_type
+    enabled: true    # Optional: include/exclude without deleting
     # ... channel config
 
 # Optional: Extensions
 extensions:
   - name: extension_name
+    enabled: true    # Optional: enable/disable
 
 # Optional: Routing rules
 routing:
   default_action: keep
   rules:
     - name: rule-name
+      enabled: true    # Optional: enable/disable
 ```
+
+---
+
+## Multi-File Config Support
+
+UniGate supports splitting config into multiple files:
+
+### Using File References
+
+```yaml
+# unigate.yaml - main config
+unigate:
+  mount_prefix: /unigate
+
+storage:
+  backend: memory
+
+instances_file: instances.yaml
+routing_file: routing.yaml
+extensions_file: extensions.yaml
+```
+
+```yaml
+# instances.yaml
+web1:
+  type: web
+
+web2:
+  type: web
+
+telegram:
+  type: telegram
+  token: !env:TELEGRAM_BOT_TOKEN
+```
+
+```yaml
+# routing.yaml
+default_action: keep
+rules:
+  - name: web1-to-web2
+    match:
+      from_instance: web1
+    actions:
+      forward_to: [web2]
+```
+
+### Using !include Directive
+
+```yaml
+# unigate.yaml - inline includes
+unigate:
+  mount_prefix: /unigate
+
+instances: !include instances.yaml
+routing: !include routing.yaml
+```
+
+---
+
+## Enable/Disable
+
+You can enable/disable instances and routing rules without deleting:
+
+```yaml
+instances:
+  web1:
+    type: web
+    enabled: true    # included
+
+  web2:
+    enabled: false   # skipped, no channel created
+
+routing:
+  rules:
+    - name: active-rule
+      enabled: true
+
+    - name: paused-rule
+      enabled: false    # skipped
+```
+
+| Key | Effect |
+|-----|--------|
+| `enabled: true` | Include (default) |
+| `enabled: false` | Exclude |
+| No `enabled` key | Include (default) |
 
 ---
 

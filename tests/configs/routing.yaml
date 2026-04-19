@@ -1,0 +1,33 @@
+# Sample routing configuration for testing
+# Use with: Unigate.from_config('tests/configs/routing.yaml')
+
+default_action: keep
+
+rules:
+  - name: web1-to-web2
+    priority: 100
+    enabled: true
+    match:
+      from_instance: web1
+    actions:
+      forward_to: [web2]
+      extensions:
+        - uppercase
+
+  - name: disabled-rule
+    priority: 50
+    enabled: false
+    match:
+      from_instance: web1
+    actions:
+      forward_to: [web2]
+
+  - name: web2-to-web1
+    priority: 100
+    enabled: true
+    match:
+      from_instance: web2
+    actions:
+      forward_to: [web1]
+      extensions:
+        - lowercase

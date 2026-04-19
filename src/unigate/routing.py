@@ -518,6 +518,9 @@ def load_rules_from_config(config: dict[str, Any], strict: bool = False) -> tupl
         if isinstance(rule_data, dict):
             rule = RoutingRule.from_dict(rule_data)
             
+            if not rule.enabled:
+                continue
+            
             if rule.actions:
                 for ext_name in rule.actions.extensions:
                     if not registry.get_match(ext_name) and not registry.get_transform(ext_name):
