@@ -31,10 +31,16 @@ Examples:
 ## Plugin Registration
 
 ### Auto-discovery
-Plugins are discovered from:
-1. Built-in plugins (always loaded)
-2. Configured plugin directories
-3. Entry points (for pip-installed plugins)
+Plugins are discovered from configured `plugin_dirs` in the config file:
+
+```yaml
+unigate:
+  plugin_dirs:
+    - ./src/unigate/plugins    # Built-in plugins
+    - ./custom_plugins        # Custom plugins
+```
+
+All plugins load from `plugin_dirs` - no hardcoded plugins.
 
 ### Manual Registration
 ```python
@@ -118,17 +124,37 @@ If a referenced plugin is not found:
 
 ## Plugin Activation
 
-### Config-based
+### Config-based with Wildcards
+
 ```yaml
-plugins:
-  enabled:
-    - channel.telegram
-    - channel.web
-    - match.text_contains
-    - transform.truncate
+unigate:
+  loaded_plugins:
+    - "channel.*"        # All channels
+    - "match.text_*"     # Text matchers
+    - "transform.*"      # All transforms
+    - "transport.http"   # Specific transport
   
-  disabled:
-    - match.day_of_week  # Not needed
+  disabled_plugins:
+    - "channel.telegram" # Skip Telegram
+    - "match.day_of_week"
+```
+
+### Pattern Matching
+
+Wildcard patterns use fnmatch syntax:
+
+| Pattern | Matches |
+|---------|---------|
+| `*` | Everything |
+| `channel.*` | All channels |
+| `match.*` | All matchers |
+| `match.text_*` | text_contains, text_starts, etc. |
+| `transport.*` | All transports |
+
+### CLI with Filters
+```bash
+# List disabled plugins
+unigate plugins list --disabled
 ```
 
 ### Runtime Toggle (CLI)
@@ -233,21 +259,14 @@ unigate reload                        # Reload everything
 # unigate.yaml
 unigate:
   plugin_dirs:
-    - ./plugins           # Local plugins
-    - ./custom_plugins    # Custom plugins
+    - ./src/unigate/plugins    # Built-in plugins
+    - ./plugins              # Custom plugins
+  
+  loaded_plugins: "*"         # Load all (or list patterns)
+  disabled_plugins: []      # Skip specific plugins
 
 plugins:
-  enabled:
-    - channel.telegram
-    - channel.web
-    - match.text_contains
-    - match.sender
-    - match.has_media
-    - transform.truncate
-    - transform.extract_subject
-    - transform.add_metadata
-    - transport.http
-  
+  enabled: []   # Legacy (use loaded_plugins/disabled_plugins instead)
   disabled: []
 
 instances:

@@ -285,13 +285,47 @@ def _load_builtins(registry: PluginRegistry) -> None:
 
 ### User Plugins
 
-Load from plugin directories:
+Load from plugin directories with filtering:
 
 ```python
 from unigate.plugins.base import register_plugin_dirs
 
-# Load plugins from custom directory
+# Load all plugins from directory
 register_plugin_dirs(["/path/to/plugins"])
+
+# Load with filtering (fnmatch patterns)
+register_plugin_dirs(
+    ["/path/to/plugins"],
+    loaded_plugins=["channel.*", "match.text_*", "transform.*"],
+    disabled_plugins=["channel.telegram"]
+)
+```
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|------------|------|---------|-------------|
+| `directories` | list | Required | Directories to scan |
+| `loaded_plugins` | str/list | `"*"` | Patterns to load |
+| `disabled_plugins` | list | `[]` | Plugins to skip |
+
+#### Wildcard Patterns
+
+```python
+# Load only channels
+register_plugin_dirs(["./plugins"], loaded_plugins="channel.*")
+
+# Load specific patterns
+register_plugin_dirs(
+    ["./plugins"],
+    loaded_plugins=["channel.*", "match.text_*", "transport.http"]
+)
+
+# Exclude specific plugins
+register_plugin_dirs(
+    ["./plugins"],
+    disabled_plugins=["channel.telegram", "match.day_of_week"]
+)
 ```
 
 ## Testing Your Plugin

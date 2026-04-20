@@ -612,6 +612,9 @@ unigate plugins list --type channel
 
 # Only enabled
 unigate plugins list --enabled
+
+# Only disabled
+unigate plugins list --disabled
 ```
 
 **Output:**

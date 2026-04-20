@@ -406,9 +406,46 @@ def _load_builtins(registry: PluginRegistry) -> None:
     pass  # No hardcoded plugins - all from plugin_dirs
 
 
-def register_plugin_dirs(directories: list[str]) -> None:
-    """Register plugins from directories."""
+def _matches_pattern(name: str | None, patterns: list[str]) -> bool:
+    """Check if plugin name matches any pattern (supports wildcards)."""
+    import fnmatch
+    if name is None:
+        return False
+    for pattern in patterns:
+        if fnmatch.fnmatch(name, pattern):
+            return True
+    return False
+
+
+def register_plugin_dirs(
+    directories: list[str],
+    loaded_plugins: str | list[str] = "*",
+    disabled_plugins: list[str] = None
+) -> tuple[list[str], list[str]]:
+    """Register plugins from directories with filtering.
+    
+    Args:
+        directories: List of directories to scan for plugins
+        loaded_plugins: "*" (all) or list of patterns (e.g., ["channel.*", "match.text_contains"])
+        disabled_plugins: List of plugin names to skip
+        
+    Returns:
+        (loaded_names, skipped_names) for reporting
+    """
+    if disabled_plugins is None:
+        disabled_plugins = []
+    
+    # Normalize loaded_plugins to list
+    if loaded_plugins == "*" or loaded_plugins is None:
+        loaded_patterns = ["*"]
+    elif isinstance(loaded_plugins, str):
+        loaded_patterns = [loaded_plugins]
+    else:
+        loaded_patterns = loaded_plugins
+    
     registry = get_registry()
+    loaded = []
+    skipped = []
     
     for dir_path in directories:
         path = Path(dir_path)
@@ -419,7 +456,68 @@ def register_plugin_dirs(directories: list[str]) -> None:
             if not file_path.suffix == ".py" or file_path.name.startswith("_"):
                 continue
             
-            _load_plugin_file(registry, file_path)
+            file_loaded = _load_plugin_file_with_filter(
+                registry, file_path, loaded_patterns, disabled_plugins
+            )
+            loaded.extend(file_loaded)
+    
+    # Count skipped
+    all_loaded = list(registry.channels.keys()) + list(registry.matches.keys()) + \
+                 list(registry.transforms.keys()) + list(registry.transports.keys())
+    
+    return loaded, skipped
+
+
+def _load_plugin_file_with_filter(
+    registry: PluginRegistry, 
+    file_path: Path | str,
+    loaded_patterns: list[str],
+    disabled_plugins: list[str]
+) -> list[str]:
+    """Load plugins from file with filtering."""
+    if isinstance(file_path, str):
+        file_path = Path(file_path)
+    module_name = file_path.stem
+    
+    loaded_names = []
+    
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if not spec or not spec.loader:
+            return []
+        
+        module = importlib.util.module_from_spec(spec)
+        module.__package__ = "unigate.plugins"
+        module.__file__ = str(file_path)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        
+        defined_classes = {name: cls for name, cls in vars(module).items() if isinstance(cls, type)}
+        
+        for attr_name, attr in defined_classes.items():
+            name = getattr(attr, "name", None)
+            plugin_type = getattr(attr, "type", None)
+            
+            if not name or not isinstance(name, str):
+                continue
+            if not plugin_type or not isinstance(plugin_type, str):
+                continue
+            
+            full_name = f"{plugin_type}.{name}"
+            
+            if full_name in disabled_plugins:
+                continue
+            
+            if not _matches_pattern(full_name, loaded_patterns):
+                continue
+            
+            registry.register(attr, "plugin_dir")
+            loaded_names.append(full_name)
+                
+    except Exception as e:
+        print(f"[PLUGIN] Error loading {file_path}: {e}")
+    
+    return loaded_names
 
 
 def _load_plugin_file(registry: PluginRegistry, file_path: Path | str) -> None:
@@ -440,10 +538,16 @@ def _load_plugin_file(registry: PluginRegistry, file_path: Path | str) -> None:
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
         
-        for attr_name in dir(module):
-            attr = getattr(module, attr_name)
-            if isinstance(attr, type):
-                registry.register(attr, "plugin_dir")
+        defined_classes = {name: cls for name, cls in vars(module).items() if isinstance(cls, type)}
+        
+        for attr_name, attr in defined_classes.items():
+            name = getattr(attr, "name", None)
+            plugin_type = getattr(attr, "type", None)
+            if not name or not isinstance(name, str):
+                continue
+            if not plugin_type or not isinstance(plugin_type, str):
+                continue
+            registry.register(attr, "plugin_dir")
     except Exception:
         pass
 

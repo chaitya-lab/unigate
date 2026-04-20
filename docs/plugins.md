@@ -440,13 +440,43 @@ class MyTransform:
 # unigate.yaml
 unigate:
   plugin_dirs:
-    - ./my_plugins
+    - ./my_plugins              # Your custom plugins
+  loaded_plugins: "*"          # Or specific patterns
+  disabled_plugins: []        # Exclude specific plugins
 
 instances:
   my_channel:
     type: mychannel
     # ... config
 ```
+
+### Plugin Filtering
+
+```yaml
+unigate:
+  plugin_dirs:
+    - ./src/unigate/plugins
+    - ./my_plugins
+  
+  # Load specific patterns (fnmatch syntax)
+  loaded_plugins:
+    - "channel.*"        # All channels
+    - "match.text_*"     # Text matchers only
+    - "transform.*"
+    - "transport.http"
+  
+  # Exclude specific plugins
+  disabled_plugins:
+    - "channel.telegram"
+    - "match.day_of_week"
+```
+
+Common patterns:
+- `"*"` - All plugins (default)
+- `"channel.*"` - All channels
+- `"match.*"` - All matchers
+- `"transform.*"` - All transforms
+- `"transport.*"` - All transports
 
 ### Plugin Directory Structure
 

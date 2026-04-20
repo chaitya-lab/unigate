@@ -188,10 +188,20 @@ unigate dead-letters requeue <id>
 
 ### Registration
 
-Plugins auto-register via:
-1. Entry points in `pyproject.toml`
-2. Files in `plugin_dirs` config
-3. Direct import
+Plugins load from `plugin_dirs` in config:
+
+```yaml
+unigate:
+  plugin_dirs:
+    - ./src/unigate/plugins    # Built-in plugins
+    - ./custom_plugins        # Custom plugins
+  
+  # Filter plugins (optional)
+  loaded_plugins: "*"       # Pattern to load (fnmatch)
+  disabled_plugins: []     # Plugins to skip
+```
+
+All plugins load from configured `plugin_dirs` - no hardcoded or entry points.
 
 ### Creating a Channel
 

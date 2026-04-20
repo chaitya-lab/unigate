@@ -193,6 +193,8 @@ unigate:
   plugin_dirs:              # Optional: Additional plugin directories
     - ./my_plugins
     - /opt/unigate/plugins
+  loaded_plugins: "*"       # "*" or list of patterns (e.g., ["channel.*", "match.text_*"])
+  disabled_plugins: []      # List of plugins to skip (supports wildcards)
   max_concurrent_processing: 50  # Max simultaneous message processing
 ```
 
@@ -200,7 +202,36 @@ unigate:
 |--------|------|---------|-------------|
 | `mount_prefix` | string | `/unigate` | URL prefix for HTTP routes |
 | `plugin_dirs` | list | `[]` | Directories to scan for plugins |
+| `loaded_plugins` | string/list | `"*"` | Plugin patterns to load (supports wildcards, e.g., `"channel.*"`, `"match.text_*"`) |
+| `disabled_plugins` | list | `[]` | Plugins to exclude (supports wildcards) |
 | `max_concurrent_processing` | int | `50` | Max concurrent message processing |
+
+### Plugin Filtering
+
+The `loaded_plugins` and `disabled_plugins` options support wildcard patterns using `fnmatch`:
+
+```yaml
+unigate:
+  # Load only channels and specific matchers
+  loaded_plugins:
+    - "channel.*"        # All channels
+    - "match.text_*"     # All text matchers (text_contains, text_starts, etc.)
+    - "transform.*"      # All transforms
+    - "transport.http"   # Specific transport
+  
+  # Exclude specific plugins
+  disabled_plugins:
+    - "channel.telegram" # Don't load Telegram
+    - "match.day_of_week" # Don't load day matcher
+```
+
+Common patterns:
+- `"*"` - Load all plugins (default)
+- `"channel.*"` - All channels
+- `"match.*"` - All matchers
+- `"transform.*"` - All transforms
+- `"transport.*"` - All transports
+- `"match.text_*"` - All text-based matchers
 
 ---
 

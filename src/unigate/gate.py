@@ -84,9 +84,13 @@ class Unigate:
         from .plugins.base import get_registry
         
         plugin_dirs = cfg.get("unigate", {}).get("plugin_dirs", [])
+        
         if plugin_dirs:
+            loaded_plugins = cfg.get("unigate", {}).get("loaded_plugins", "*")
+            disabled_plugins = cfg.get("unigate", {}).get("disabled_plugins", [])
+            
             from .plugins.base import register_plugin_dirs
-            register_plugin_dirs(plugin_dirs)
+            register_plugin_dirs(plugin_dirs, loaded_plugins, disabled_plugins)
         
         from .config import filter_by_enabled
         instance_manager = filter_by_enabled(instance_manager)
