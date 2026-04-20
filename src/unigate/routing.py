@@ -18,7 +18,32 @@ if TYPE_CHECKING:
 
 @dataclass
 class MatchCondition:
-    """Conditions for matching a message."""
+    """Conditions for matching a message.
+    
+    Supports three syntaxes:
+    
+    1. Simple (current):
+       match:
+         from_instance: web
+         sender_id: "123"
+         text_contains: "hello"
+    
+    2. Type-based (new):
+       match:
+         - type: sender_id
+           op: eq
+           value: "123"
+         - type: text
+           op: contains
+           value: "urgent"
+         - type: sender_id
+           op: in
+           value: ["123", "456", "789"]
+    
+    3. Code (new):
+       match:
+         code: "msg.sender.platform_id == '123' or 'urgent' in (msg.text or '')"
+    """
     
     from_channel: str | None = None
     from_instance: str | None = None
@@ -39,10 +64,29 @@ class MatchCondition:
     day_of_week: str | list[str] | None = None
     hour_of_day: int | list[int] | str | None = None
     
+    # New: code-based and type-based matching
+    code: str | None = None
+    conditions: list[dict] | None = None  # [{"type": "field", "op": "op", "value": ...}]
+    
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> MatchCondition | None:
         if not data:
             return None
+        
+        # Handle type-based match: list of conditions directly
+        if isinstance(data, list):
+            return cls(
+                conditions=data,
+            )
+        
+        # Handle dict - extract code and conditions
+        conditions = None
+        if isinstance(data, dict):
+            conditions = data.get("conditions")
+            code = data.get("code")
+        
+        # Handle simple keys
+        
         return cls(
             from_channel=data.get("from_channel"),
             from_instance=data.get("from_instance"),
@@ -62,10 +106,12 @@ class MatchCondition:
             media_type=data.get("media_type"),
             day_of_week=data.get("day_of_week"),
             hour_of_day=data.get("hour_of_day"),
+            code=data.get("code"),
+            conditions=conditions,
         )
     
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "from_channel": self.from_channel,
             "from_instance": self.from_instance,
             "sender_pattern": self.sender_pattern,
@@ -85,9 +131,18 @@ class MatchCondition:
             "day_of_week": self.day_of_week,
             "hour_of_day": self.hour_of_day,
         }
+        if self.code:
+            result["code"] = self.code
+        if self.conditions:
+            result["conditions"] = self.conditions
+        return result
     
     def matches_everything(self) -> bool:
-        return all(v is None for v in self.to_dict().values())
+        # Check simple matches AND code/conditions
+        simple = any(v is not None for v in self.to_dict().values() if v is not None)
+        has_code = bool(self.code)
+        has_conditions = bool(self.conditions and len(self.conditions) > 0)
+        return not (simple or has_code or has_conditions)
 
 
 @dataclass
@@ -148,7 +203,21 @@ class RoutingRule:
     def match_message(self, message: Message) -> bool:
         if not self.enabled:
             return False
-        if self.match is None or self.match.matches_everything():
+        if self.match is None:
+            return True
+        
+        # Handle code-based matching
+        if self.match.code:
+            if RuleMatcher.match_code(message, self.match.code):
+                return True
+        
+        # Handle type-based conditions
+        if self.match.conditions:
+            if RuleMatcher.match_conditions(message, self.match.conditions):
+                return True
+        
+        # Original simple matching
+        if self.match.matches_everything():
             return True
         return RuleMatcher.match_message(message, self.match)
 
@@ -224,6 +293,118 @@ class RuleMatcher:
                     return False
         
         return True
+    
+    @classmethod
+    def match_code(cls, message: Message, code: str) -> bool:
+        """Match using Python code.
+        
+        Code has access to:
+          - msg: Message object
+          - config: dict
+        
+        Example: "msg.sender.platform_id == '123' or 'urgent' in (msg.text or '')"
+        """
+        if not code:
+            return True
+        try:
+            context = {"msg": message, "config": {}}
+            result = exec(code, context)
+            return bool(result) if result is not None else True
+        except Exception:
+            return False
+    
+    @classmethod
+    def match_conditions(cls, message: Message, conditions: list[dict]) -> bool:
+        """Match using type-based conditions.
+        
+        Format:
+          - type: sender_id      # field name
+            op: eq           # operation: eq, ne, contains, startswith, endswith, in, gt, lt, regex
+            value: "123"     # value to match
+        
+        Example:
+          - type: sender_id
+            op: in
+            value: ["123", "456"]
+          - type: text
+            op: contains
+            value: "urgent"
+        """
+        if not conditions:
+            return True
+        
+        for cond in conditions:
+            if not isinstance(cond, dict):
+                continue
+            
+            field = cond.get("type")
+            op = cond.get("op", "eq")
+            value = cond.get("value")
+            
+            if not field:
+                continue
+            
+            # Get field value from message
+            field_value = cls._get_field_value(message, field)
+            
+            if not cls._match_value(field_value, op, value):
+                return False
+        
+        return True
+    
+    @staticmethod
+    def _get_field_value(message: Message, field: str) -> Any:
+        """Get field value from message by name.
+        
+        Supports nested access like sender.id, metadata.key, raw.update_id
+        """
+        parts = field.split(".")
+        value = message
+        
+        for part in parts:
+            if value is None:
+                return None
+            if hasattr(value, part):
+                value = getattr(value, part)
+            elif isinstance(value, dict):
+                value = value.get(part)
+            else:
+                return None
+        
+        return value
+    
+    @classmethod
+    def _match_value(cls, field_value: Any, op: str, match_value: Any) -> bool:
+        """Match field value with operation."""
+        if op == "eq":
+            return field_value == match_value
+        elif op == "ne":
+            return field_value != match_value
+        elif op == "contains":
+            return match_value and str(match_value) in str(field_value)
+        elif op == "startswith":
+            return field_value and str(field_value).startswith(str(match_value))
+        elif op == "endswith":
+            return field_value and str(field_value).endswith(str(match_value))
+        elif op == "in":
+            return field_value in match_value if isinstance(match_value, (list, tuple, set)) else field_value == match_value
+        elif op == "gt" and field_value is not None and match_value is not None:
+            try:
+                return float(field_value) > float(match_value)
+            except (ValueError, TypeError):
+                return False
+        elif op == "lt" and field_value is not None and match_value is not None:
+            try:
+                return float(field_value) < float(match_value)
+            except (ValueError, TypeError):
+                return False
+        elif op == "regex" and field_value and match_value:
+            import re
+            return re.search(str(match_value), str(field_value)) is not None
+        elif op == "exists":
+            return (field_value is not None) == match_value
+        else:
+            return field_value == match_value
     
     @classmethod
     def _match_fallback(cls, key: str, message: Message, value: Any) -> bool:
