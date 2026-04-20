@@ -309,6 +309,35 @@ unigate instances health telegram --force
 - `unhealthy` - Auth failed or channel down
 - `unknown` - Not configured or cannot determine
 
+### `instances reload`
+
+Reload an instance to pick up config changes (e.g., new token).
+
+```bash
+unigate instances reload INSTANCE_ID [--reset]
+```
+
+**Options:**
+- `INSTANCE_ID` - Instance to reload
+- `--reset, -r` - Reset credentials before reloading
+
+**Examples:**
+
+```bash
+# Reload to pick up token change
+unigate instances reload telegram
+
+# Reset credentials then reload (if token was removed)
+unigate instances reload telegram --reset
+```
+
+**Use cases:**
+- Token changed in config (from BotFather, Twilio, etc.)
+- Want to force re-read environment variables
+- Instance is degraded due to auth issues
+
+> Note: Other instances are unaffected during reload.
+
 ### `instances restart`
 
 Restart a specific instance.
