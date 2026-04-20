@@ -124,7 +124,11 @@ class Exchange:
     def setup_routing(self, config: dict) -> None:
         """Set up routing engine with configuration."""
         from .routing import RoutingEngine
-        self._routing_engine = RoutingEngine(self, config)
+        ext_config = config.get("extensions", [])
+        full_config = dict(config)
+        if "extensions" not in full_config:
+            full_config["extensions"] = ext_config
+        self._routing_engine = RoutingEngine(self, full_config)
         self._routing_enabled = True
 
     def set_handler(self, handler: Handler) -> None:

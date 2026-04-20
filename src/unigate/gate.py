@@ -134,7 +134,8 @@ class Unigate:
         if cfg.get("routing"):
             exchange.setup_routing(cfg)
         
-        for ext_config in cfg.get("extensions", []):
+        extensions_list = cfg.get("extensions") or []
+        for ext_config in extensions_list:
             if isinstance(ext_config, dict) and ext_config.get("enabled") is False:
                 continue
             

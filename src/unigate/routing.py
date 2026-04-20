@@ -282,6 +282,7 @@ class RoutingEngine:
         self.config = config or {}
         self._rules: list[RoutingRule] = []
         self._extensions: dict[str, Any] = {}
+        self._extensions_config: list = config.get("extensions", []) if config else []
         self._plugin_registry = get_registry()
         self._default_action: str = "keep"
         self._default_instance: str | None = "default"
@@ -324,7 +325,7 @@ class RoutingEngine:
                 self._rules.sort(key=lambda r: r.priority)
 
     def _load_extensions(self) -> None:
-        extensions_config = self.config.get("extensions", [])
+        extensions_config = self._extensions_config or []
         for ext_config in extensions_config:
             if not isinstance(ext_config, dict):
                 continue
