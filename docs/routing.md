@@ -1,341 +1,223 @@
 # Routing Configuration
 
-## Overview
+UniGate routes messages using configurable rules. Rules are evaluated in priority order - first match wins.
 
-Unigate routes messages based on configurable rules. Rules are defined in YAML and evaluated in priority order.
+---
 
-## Configuration
-
-```yaml
-# unigate.yaml
-unigate:
-  mount_prefix: /unigate
-
-instances:
-  web_ui:
-    type: webui
-  telegram_sales:
-    type: telegram
-    token: !env:TELEGRAM_TOKEN
-  telegram_support:
-    type: telegram
-    token: !env:SUPPORT_TOKEN
-
-routing:
-  default_action: keep  # keep, discard, or forward
-  default_instance: default
-  unprocessed:
-    retention_days: 7
-  rules:
-    - name: sales-keyword
-      priority: 100
-      enabled: true
-      match:
-        text_contains: "sales"
-      actions:
-        forward_to: [telegram_sales]
-    
-    - name: support-keyword
-      priority: 100
-      match:
-        text_contains: "help"
-      actions:
-        forward_to: [telegram_support]
-```
-
-## Rule Structure
+## Quick Reference
 
 ```yaml
 routing:
+  default_action: keep      # keep | discard | forward
   rules:
-    - name: my-rule              # Required: unique name
-      priority: 100             # Lower = higher priority (checked first)
-      enabled: true             # Can be false to disable
-      match:                    # Match conditions (three syntaxes below)
-      actions:
-        forward_to: [instance1, instance2]  # Where to send
-        keep_in_default: false   # Also send to default destination
-        add_tags: [tag1, tag2]  # Tags for tracking
-        extensions: []          # Transforms to apply
+    - name: rule-name      # Unique name (required)
+      priority: 100        # Lower = higher priority (checked first)
+      enabled: true        # Can disable without deleting
+      match:              # Match conditions (see below)
+      actions:            # What to do (see below)
 ```
+
+---
 
 ## Match Syntax
 
-UniGate supports three match syntaxes:
+UniGate supports **three** ways to match messages:
 
-### 1. Simple (Key-Value)
+### 1. Simple Match (Key-Value)
+
+Best for: Simple conditions, AND logic
 
 ```yaml
 match:
-  from_instance: web
-  sender_id: "123456"
-  text_contains: "urgent"
+  from_instance: telegram      # Source channel
+  sender_id: "123456789"      # Exact sender ID
+  text_contains: "urgent"   # Text contains word
 ```
 
-All conditions = AND logic (all must match).
+All conditions must match (AND logic).
 
-### 2. Type-Based (List of Conditions)
+**Available fields:**
+
+| Field | Type | Description | Example |
+|-------|------|-------------|---------|
+| `from_instance` | string | Source instance | `telegram` |
+| `sender_id` | string | Sender ID | `"123456"` |
+| `sender_pattern` | string | Glob pattern | `"vip_*"` |
+| `sender_name_contains` | string | Name contains | `"John"` |
+| `text_contains` | string | Text contains | `"help"` |
+| `text_pattern` | string | Regex | `"^\\d{4}$"` |
+| `group_id` | string | Group ID | `"chat123"` |
+| `thread_id` | string | Thread ID | `"thread123"` |
+| `has_media` | bool | Has media | `true` |
+| `has_attachment` | bool | Has attachment | `true` |
+| `has_image` | bool | Has image | `true` |
+| `has_video` | bool | Has video | `true` |
+| `day_of_week` | string/list | Day | `monday` or `[monday,tuesday]` |
+| `hour_of_day` | int/list | Hour 0-23 | `9` or `[9,10,11]` |
+
+---
+
+### 2. Type-Based Match (Operations)
+
+Best for: Complex conditions, multiple operations on same field
 
 ```yaml
 match:
   - type: sender_id
     op: in
-    value: ["123", "456", "789"]
+    value: ["123", "456", "789"]     # Multiple values (OR)
+  
   - type: text
     op: contains
-    value: "urgent"
+    value: "urgent"                 # Contains substring
+  
+  - type: group_id
+    op: startswith
+    value: "support-"              # Starts with
 ```
 
 **Operators:**
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `eq` | Equal | `value: "123"` |
-| `ne` | Not equal | `value: "123"` |
-| `contains` | Contains substring | `value: "urgent"` |
-| `startswith` | Starts with | `value: "vip_"` |
-| `endswith` | Ends with | `value: "_admin"` |
-| `in` | In list | `value: ["a", "b", "c"]` |
-| `regex` | Regex pattern | `value: "^\\d{4}$"` |
-| `gt` | Greater than | `value: 100` |
-| `lt` | Less than | `value: 50` |
-| `exists` | Field exists | `value: true` |
 
-**Field Types:** Use any message field (e.g., `sender_id`, `sender.name`, `metadata.key`, `raw.update_id`)
+| Operator | Description | Example Value |
+|----------|-------------|---------------|
+| `eq` | Equal | `"123"` |
+| `ne` | Not equal | `"123"` |
+| `contains` | Contains | `"urgent"` |
+| `startswith` | Starts with | `"vip_"` |
+| `endswith` | Ends with | `"_admin"` |
+| `in` | In list | `["a","b","c"]` |
+| `regex` | Regex pattern | `"^\\d{4}$"` |
+| `gt` | Greater than | `100` |
+| `lt` | Less than | `50` |
+| `exists` | Field exists | `true` |
 
-### 3. Code (Python Expression)
+**Type names** (any message field):
+- `sender_id`, `sender.name`, `sender.handle`
+- `text`, `session_id`, `group_id`, `thread_id`
+- `metadata.key` → `metadata.key` → accesses `msg.metadata.get('key')`
+- `raw.field` → accesses raw field
+
+---
+
+### 3. Code Match (Python Expression)
+
+Best for: Maximum flexibility, complex logic
 
 ```yaml
 match:
   code: "msg.sender.platform_id == '123' or 'urgent' in (msg.text or '')"
 ```
 
-Available: `msg` (Message object), `msg.sender.platform_id`, `msg.text`, `msg.metadata`, etc.
+**Access fields:**
+- `msg.sender.platform_id` - Sender ID
+- `msg.sender.name` - Sender name  
+- `msg.text` - Message text
+- `msg.metadata.get('key')` - Metadata value
+- `msg.raw.get('field')` - Raw field
+- `msg.group_id`, `msg.session_id`, etc.
 
-## Match Conditions
+**Available in code:**
+- `msg` - Full Message object
+- `config` - Rule config dict
 
-| Condition | Type | Description | Example |
-|-----------|------|-------------|---------|
-| `from_instance` | string | Source channel instance | `web_ui` |
-| `text_contains` | string | Text substring (case-insensitive) | `"sales"` |
-| `text_pattern` | string | Regex pattern | `"\d{4}-\d{2}-\d{2}"` |
-| `sender_id` | string | Exact sender ID | `"user123"` |
-| `sender_pattern` | string | Glob pattern | `"vip_*"` |
-| `sender_name_contains` | string | Name substring | `"John"` |
-| `group_id` | string | Exact group ID | `"dev-channel"` |
-| `group_id_pattern` | string | Glob pattern | `"dev-*" |
-| `thread_id` | string | Thread ID | `"thread123"` |
-| `has_media` | bool | Has any media | `true` |
-| `has_attachment` | bool | Has attachment | `true` |
-| `has_image` | bool | Has image | `true` |
-| `has_video` | bool | Has video | `true` |
-| `day_of_week` | string/list | Day name(s) | `monday` or `[monday, tuesday]` |
-| `hour_of_day` | int/list | Hour(s) 0-23 | `9` or `[9, 10, 11]` |
-
-## Priority
-
-**Lower number = higher priority**
-
-Rules are evaluated in priority order. The **first matching rule wins**.
-
-```yaml
-# Example: Urgent takes precedence
-routing:
-  rules:
-    - name: urgent-high
-      priority: 1              # Highest priority
-      match:
-        text_contains: "URGENT"
-      actions:
-        forward_to: [priority_channel]
-
-    - name: normal
-      priority: 100            # Normal priority
-      match:
-        text_contains: "help"
-      actions:
-        forward_to: [support_channel]
-```
-
-Message "URGENT help" → routes to `priority_channel` only.
+---
 
 ## Actions
 
-### forward_to
-
-Send message to specified instance(s):
-
 ```yaml
 actions:
-  forward_to: [telegram_bot]
+  forward_to: [instance1, instance2]   # Send to destination(s)
+  keep_in_default: true                  # Also keep in source (optional)
+  extensions: [ext1, ext2]              # Transforms to apply
+  add_tags: [tag1, tag2]                # Tags for tracking
 ```
 
-Multiple destinations (fan-out):
-```yaml
-actions:
-  forward_to: [email, slack, pagerduty]
-```
+- `forward_to`: One or more instances (fan-out = multiple destinations)
+- `keep_in_default`: Keep message in original instance too
+- `extensions`: Transform names to apply
+- `add_tags`: Tags added to message metadata
 
-### keep_in_default
-
-Forward to specified destination AND keep in default:
-
-```yaml
-actions:
-  forward_to: [archive]
-  keep_in_default: true
-```
-
-### add_tags
-
-Add tags to message metadata:
-
-```yaml
-actions:
-  forward_to: [handler]
-  add_tags: [sales, qualified]
-```
-
-### extensions
-
-Apply transforms before forwarding:
-
-```yaml
-actions:
-  forward_to: [sms]
-  extensions:
-    - transform.truncate  # Max 160 chars for SMS
-```
-
-## Multiple Conditions (AND Logic)
-
-All conditions must match for the rule to apply:
-
-```yaml
-- name: vip-dev-team
-  priority: 10
-  match:
-    sender_pattern: "vip_*"      # AND
-    group_id: "dev-team"         # AND
-    hour_of_day: [9, 10, 11, 12, 13, 14, 15, 16, 17]  # AND
-  actions:
-    forward_to: [vip_dev_channel]
-```
-
-## Default Action
-
-When no rule matches:
-
-```yaml
-routing:
-  default_action: keep    # Keep in original instance
-  # default_action: discard  # Drop the message
-  # default_action: forward  # Forward to specific instances
-  # default_forward_to: [archive]  # Used when default_action is forward
-```
+---
 
 ## Examples
 
-### Route by Text Content
+### Example 1: Route by User (Simple)
 
 ```yaml
 routing:
   rules:
-    - name: sales-messages
-      priority: 100
-      match:
-        text_contains: "buy"
-      actions:
-        forward_to: [sales_telegram]
-
-    - name: support-messages
-      priority: 100
-      match:
-        text_contains: "help"
-      actions:
-        forward_to: [support_telegram]
-```
-
-### Route by Sender (One Bot, Multiple Users)
-
-**The most common pattern: one Telegram bot, different users get different routing and transforms:**
-
-```yaml
-# One bot, different users -> different handling
-routing:
-  rules:
-    # Premium user gets uppercase + VIP channel
     - name: premium-user
       priority: 50
       match:
-        from_instance: telegram           # From the bot
-        sender_id: "123456789"            # Premium user ID
+        from_instance: telegram
+        sender_id: "123456789"      # Exact user ID
       actions:
         forward_to: [web_premium]
-        extensions:
-          - uppercase
-          - add_prefix
+        extensions: [uppercase]
 
-    # Regular user gets lowercase + regular channel
     - name: regular-user
       priority: 100
       match:
         from_instance: telegram
-        sender_id: "987654321"            # Regular user ID
+        sender_id: "987654321"
       actions:
         forward_to: [web_regular]
-        extensions:
-          - lowercase
 
-    # Default for other users
-    - name: catch-all
+    - name: others
       priority: 200
       match:
         from_instance: telegram
       actions:
-        forward_to: [web_standard]
+        forward_to: [web_default]
 ```
 
-**Using sender_pattern for groups of users:**
+### Example 2: Route by User Group (Type-Based OR)
 
 ```yaml
 routing:
   rules:
-    # All VIP users (pattern matching)
     - name: vip-users
       priority: 50
       match:
-        sender_pattern: "vip_*"            # Users with ID starting "vip_"
+        - type: sender_id
+          op: in
+          value: ["123", "456", "789", "111"]
+        - type: sender_id
+          op: startswith
+          value: "vip_"
       actions:
         forward_to: [vip_channel]
 
-    - name: regular-users
+    - name: regular
       priority: 100
-      match: {}                           # Matches everything else
+      match:
+        from_instance: telegram
       actions:
-        forward_to: [general_channel]
+        forward_to: [regular_channel]
 ```
 
-### Route by Group
+### Example 3: Route by Text + Sender (Code)
 
 ```yaml
 routing:
   rules:
-    - name: engineering
-      priority: 100
+    - name: urgent-vip
+      priority: 50
       match:
-        group_id_pattern: "eng-*"
+        code: "(msg.sender.platform_id in ['123','456'] or msg.sender.platform_id.startswith('vip_')) and 'urgent' in (msg.text or '')"
       actions:
-        forward_to: [eng_slack]
+        forward_to: [priority_queue]
+        extensions: [uppercase]
 
-    - name: sales-team
+    - name: normal
       priority: 100
       match:
-        group_id_pattern: "sales-*"
+        code: "msg.text and 'help' in msg.text"
       actions:
-        forward_to: [sales_slack]
+        forward_to: [support]
 ```
 
-### Business Hours Routing
+### Example 4: Route by Time (Simple)
 
 ```yaml
 routing:
@@ -350,133 +232,163 @@ routing:
 
     - name: after-hours
       priority: 100
-      match: {}
+      match: {}        # Match everything else
       actions:
         forward_to: [voicemail]
 ```
 
-### Media Routing
+### Example 5: Route by Media (Simple)
 
 ```yaml
 routing:
   rules:
-    - name: image-attachments
-      priority: 100
+    - name: has-images
+      priority: 50
       match:
         has_image: true
       actions:
-        forward_to: [image_processor]
-        extensions:
-          - transform.add_metadata
-          - add_timestamp
+        forward_to: [image_handler]
 
-    - name: video-content
-      priority: 100
+    - name: has-video
+      priority: 50
       match:
         has_video: true
       actions:
-        forward_to: [video_processor]
-```
+        forward_to: [video_handler]
 
-## Viewing Rules
-
-```bash
-# List all routing rules
-unigate plugins status
-```
-
-## Validating Rules
-
-```bash
-# Validate routing configuration
-unigate plugins validate --config unigate.yaml
-```
-
-## Loading from External File
-
-```yaml
-routing:
-  rules_file: ./config/routing/rules.yaml
-```
-
-```yaml
-# config/routing/rules.yaml
-rules:
-  - name: external-rule
-    priority: 100
-    match:
-      text_contains: "external"
-    actions:
-      forward_to: [external_handler]
-```
-
-## Complete Example
-
-```yaml
-unigate:
-  mount_prefix: /unigate
-
-instances:
-  web_ui:
-    type: webui
-
-  telegram_sales:
-    type: telegram
-    token: !env:SALES_TOKEN
-
-  telegram_support:
-    type: telegram
-    token: !env:SUPPORT_TOKEN
-
-  sms_gateway:
-    type: web
-    webhook_secret: !env:SMS_SECRET
-
-routing:
-  default_action: keep
-  
-  rules:
-    # VIP users go to priority queue
-    - name: vip-routing
-      priority: 10
-      match:
-        sender_pattern: "vip_*"
-      actions:
-        forward_to: [telegram_sales]
-        add_tags: [vip]
-
-    # Sales keywords to sales team
-    - name: sales-keywords
-      priority: 50
-      match:
-        text_contains: ["buy", "purchase", "pricing", "quote"]
-      actions:
-        forward_to: [telegram_sales]
-        add_tags: [sales]
-
-    # Support keywords to support team
-    - name: support-keywords
-      priority: 50
-      match:
-        text_contains: ["help", "support", "issue", "problem"]
-      actions:
-        forward_to: [telegram_support]
-        add_tags: [support]
-
-    # Media attachments to processor
-    - name: media-attachment
+    - name: text-only
       priority: 100
       match:
-        has_attachment: true
+        from_instance: telegram
       actions:
-        forward_to: [sms_gateway]
-        extensions:
-          - transform.truncate
+        forward_to: [text_handler]
+```
 
-    # Everything else stays in web UI
-    - name: catch-all
-      priority: 1000
+### Example 6: Multiple Rules (OR simulation)
+
+```yaml
+routing:
+  rules:
+    - name: user-123-only
+      priority: 50
+      match:
+        sender_id: "123"
+      actions:
+        forward_to: [dest_a]
+
+    - name: user-456-only
+      priority: 50
+      match:
+        sender_id: "456"
+      actions:
+        forward_to: [dest_b]
+
+    - name: user-789-only  
+      priority: 50
+      match:
+        sender_id: "789"
+      actions:
+        forward_to: [dest_c]
+
+    - name: everyone-else
+      priority: 200
       match: {}
       actions:
-        keep_in_default: true
+        forward_to: [dest_default]
 ```
+
+First matching rule wins. Use priority to control order.
+
+---
+
+## Default Action
+
+When no rule matches:
+
+```yaml
+routing:
+  default_action: keep      # Keep in original instance (default)
+  # default_action: discard  # Drop the message
+  # default_action: forward  # Forward to default instances
+  # default_forward_to: [archive]  # Used when default_action is forward
+```
+
+---
+
+## Priority
+
+**Lower number = higher priority**
+
+```yaml
+- name: urgent-rule
+  priority: 1           # Checked FIRST
+  match:
+    text_contains: "urgent"
+  actions:
+    forward_to: [priority]
+
+- name: normal-rule
+  priority: 100          # Checked SECOND
+  match:
+    text_contains: "help"
+  actions:
+    forward_to: [support]
+
+- name: default          # LAST RESORT
+  priority: 1000
+  match: {}
+  actions:
+    forward_to: [catchall]
+```
+
+"urgent help request" → routes to `priority` only (first match wins).
+
+---
+
+## Enable/Disable Rules
+
+Disable without deleting:
+
+```yaml
+- name: temporary-disabled-rule
+  enabled: false           # Rule ignored
+  match:
+    sender_id: "123"
+  actions:
+    forward_to: [dest]
+```
+
+---
+
+## Testing Rules
+
+```bash
+# Validate config
+python -m unigate start -f -c config.yaml
+
+# Check loaded rules
+python -m unigate status
+```
+
+---
+
+## Message Fields Reference
+
+```
+Message:
+  id                  # Unique message ID
+  session_id          # Conversation ID
+  from_instance       # Source channel name
+  sender.platform_id  # Sender's platform ID
+  sender.name         # Sender's display name
+  sender.handle       # Sender's handle/username
+  text                # Message text
+  media               # List of media
+  group_id            # Group ID (if in group)
+  thread_id           # Thread ID
+  metadata            # Custom metadata dict
+  raw                  # Original platform payload
+  ts                   # Timestamp
+```
+
+Access in code: `msg.sender.platform_id`, `msg.text`, `msg.metadata.get('key')`, etc.
