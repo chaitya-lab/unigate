@@ -96,16 +96,20 @@ routing: !include routing.yaml
 
 ## Enable/Disable
 
-You can enable/disable instances and routing rules without deleting:
+There are **two** levels of enable/disable:
+
+### 1. Config-Level (`enabled:` in YAML)
+
+Controls whether instances/rules are loaded at startup.
 
 ```yaml
 instances:
   web1:
     type: web
-    enabled: true    # included
+    enabled: true    # loaded
 
   web2:
-    enabled: false   # skipped, no channel created
+    enabled: false   # not loaded
 
 routing:
   rules:
@@ -113,7 +117,7 @@ routing:
       enabled: true
 
     - name: paused-rule
-      enabled: false    # skipped
+      enabled: false    # not loaded
 ```
 
 | Key | Effect |
@@ -121,6 +125,21 @@ routing:
 | `enabled: true` | Include (default) |
 | `enabled: false` | Exclude |
 | No `enabled` key | Include (default) |
+
+### 2. Runtime (CLI Commands)
+
+Controls whether running instances/processes are active:
+
+```bash
+unigate instances enable telegram    # Start processing
+unigate instances disable telegram  # Stop processing
+
+unigate plugins enable telegram      # Activate plugin
+unigate plugins disable telegram    # Deactivate plugin
+```
+
+- CLI commands affect *running* instances (require server to be running)
+- Config YAML affects *what loads* at startup
 
 ---
 

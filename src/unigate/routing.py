@@ -158,9 +158,13 @@ class RoutingAction:
     def from_dict(cls, data: dict[str, Any] | None) -> RoutingAction | None:
         if not data:
             return None
+        # Support both "extensions" and "transforms" as aliases
+        extensions = data.get("extensions", [])
+        if not extensions:
+            extensions = data.get("transforms", [])
         return cls(
             forward_to=data.get("forward_to", []),
-            extensions=data.get("extensions", []),
+            extensions=extensions,
             keep_in_default=data.get("keep_in_default", False),
             add_tags=data.get("add_tags", []),
         )
@@ -460,6 +464,14 @@ class RuleMatcher:
             sender = getattr(message, "sender", None)
             sender_name = getattr(sender, "name", None) if sender else None
             return cls.match_contains(sender_name, value)
+        elif key == "sender_domain":
+            sender = getattr(message, "sender", None)
+            sender_handle = getattr(sender, "handle", None) if sender else None
+            if not sender_handle or "@" not in sender_handle:
+                return False
+            domain = sender_handle.split("@")[1].lower()
+            values = [v.lower() for v in (value if isinstance(value, list) else [value])]
+            return domain in values
         elif key == "text_contains":
             return cls.match_contains(getattr(message, "text", None), value)
         elif key == "text_pattern":
