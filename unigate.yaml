@@ -1,0 +1,254 @@
+# =============================================================================
+# UniGate Configuration File
+# =============================================================================
+# 
+# This is the default configuration file for UniGate.
+# UniGate is a universal messaging exchange - routes messages between channels.
+#
+# QUICK START:
+#   1. Run: python -m unigate start -f
+#   2. Open: http://localhost:8080/unigate/web/web
+#   3. Done! Messages from Web UI can route to other channels.
+#
+# CONFIG BASICS:
+#   - This file is loaded by default when you run 'unigate start'
+#   - Use '-c config.yaml' to load a different config file
+#   - YAML format: use spaces for indentation, not tabs
+#
+# =============================================================================
+# GLOBAL SETTINGS
+# =============================================================================
+
+unigate:
+  # URL prefix for all HTTP routes (default: /unigate)
+  # Examples:
+  #   /unigate -> http://localhost:8080/unigate/webhook/instance
+  #   /api     -> http://localhost:8080/api/webhook/instance
+  mount_prefix: /unigate
+  
+  # Additional plugin directories (optional)
+  # plugin_dirs:
+  #   - ./my_plugins
+  #   - /opt/unigate/plugins
+
+# =============================================================================
+# STORAGE SETTINGS
+# =============================================================================
+
+storage:
+  # Storage backend: memory | sqlite | file
+  #   memory: Fast, no persistence (default for dev)
+  #   sqlite: Persistent, single file (default for prod)
+  #   file:   Per-message JSON files (for debugging)
+  backend: memory
+  
+  # Storage path (optional, default locations)
+  #   sqlite: ./unigate.db in current dir
+  #   file:   ./unigate_messages in current dir
+  # path: ./unigate.db
+  
+  # How long to keep messages (days)
+  # retention_days: 7
+
+# =============================================================================
+# CHANNEL INSTANCES
+# =============================================================================
+#
+# Define your messaging channels here. Each instance connects to one channel.
+# Common types:
+#   webui   - Web UI for testing (receives via HTTP)
+#   web     - Generic webhook receiver
+#   telegram - Telegram bot
+#   whatsapp - WhatsApp Business
+#   internal - In-process handler (no network)
+#
+# DISABLING INSTANCES:
+#   Add 'enabled: false' to disable without deleting:
+#     telegram:
+#       type: telegram
+#       enabled: false
+#       token: !env:TELEGRAM_TOKEN
+#
+
+instances:
+  # Web UI instance for testing
+  # Access at: http://localhost:8080/unigate/web/web
+  web:
+    type: webui
+    # enabled: true  # default
+
+  # Example: Telegram bot (uncomment to enable)
+  # telegram:
+  #   type: telegram
+  #   token: !env:TELEGRAM_BOT_TOKEN
+  #   mode: polling  # or: webhook
+  #   # For webhook mode, set your webhook URL:
+  #   # webhook_url: https://your-domain.com/unigate/webhook/telegram
+
+  # Example: Second Telegram bot (uncomment to enable)
+  # telegram2:
+  #   type: telegram
+  #   token: !env:TELEGRAM_BOT_TOKEN_2
+  #   enabled: false
+
+  # Example: Generic webhook (uncomment to enable)
+  # my_webhook:
+  #   type: web
+  #   enabled: false
+  #   # Optional: webhook verification
+  #   # auth_method: hmac
+  #   # webhook_secret: !env:WEBHOOK_SECRET
+
+# =============================================================================
+# EXTENSIONS (Transforms)
+# =============================================================================
+#
+# Extensions modify messages in the pipeline (transforms).
+# Built-in transforms:
+#   uppercase    - Convert to UPPERCASE
+#   lowercase    - Convert to lowercase
+#   titlecase    - Convert to Title Case
+#   truncate     - Truncate message text
+#   add_prefix    - Add prefix to message
+#   add_suffix    - Add suffix to message
+#   add_timestamp - Add timestamp metadata
+#   add_metadata  - Add custom metadata
+#
+# ENABLING/DISABLING:
+#   Add 'enabled: false' to skip without deleting:
+#     - name: uppercase
+#       enabled: false
+
+extensions:
+  # Example transforms (commented out by default)
+  # - name: uppercase
+  #   type: transform
+  #   config:
+  #     transform: uppercase
+  #
+  # - name: lowercase
+  #   type: transform
+  #
+  # - name: add_prefix
+  #   type: transform
+  #   config:
+  #     prefix: "[PREFIX] "
+
+  # Inline code transform (advanced)
+  # - name: custom_transform
+  #   type: inline
+  #   config:
+  #     transforms:
+  #       - code: "msg.text = 'CUSTOM: ' + msg.text if msg.text else msg.text"
+
+# =============================================================================
+# ROUTING RULES
+# =============================================================================
+#
+# Route messages based on conditions. Rules are evaluated in priority order.
+# First matching rule wins!
+#
+# MATCH CONDITIONS:
+#   from_instance        - Source channel (e.g., 'web', 'telegram')
+#   sender_id            - Exact sender ID (e.g., "123456789")
+#   sender_pattern       - Glob pattern (e.g., "vip_*")
+#   sender_name_contains - Name contains substring
+#   text_contains       - Message text contains
+#   text_pattern        - Regex pattern
+#   group_id            - Group ID
+#   has_media           - Has any media
+#   day_of_week         - Day of week (monday, tuesday, ...)
+#   hour_of_day          - Hour 0-23
+#
+# ACTIONS:
+#   forward_to: [instance1, instance2]  - Send to destination(s)
+#   extensions: [ext1, ext2]           - Apply transforms
+#   add_tags: [tag1, tag2]             - Add tags
+#   keep_in_default: true              - Also keep in source
+#
+# EXAMPLES:
+
+# Example 1: Web UI to Telegram (uncomment telegram above first!)
+# routing:
+#   rules:
+#     - name: web-to-telegram
+#       priority: 100
+#       match:
+#         from_instance: web
+#       actions:
+#         forward_to: [telegram]
+
+# Example 2: Telegram to Web UI
+#     - name: telegram-to-web
+#       priority: 100
+#       match:
+#         from_instance: telegram
+#       actions:
+#         forward_to: [web]
+
+# Example 3: One bot, different users -> different routing
+#     - name: premium-user
+#       priority: 50
+#       match:
+#         from_instance: telegram
+#         sender_id: "123456789"  # Premium user ID
+#       actions:
+#         forward_to: [web_premium]
+#         extensions: [uppercase]
+#
+#     - name: regular-user
+#       priority: 100
+#       match:
+#         from_instance: telegram
+#         sender_id: "987654321"  # Regular user ID
+#       actions:
+#         forward_to: [web_regular]
+#         extensions: [lowercase]
+
+# Example 4: Keyword routing
+#     - name: sales-keyword
+#       priority: 50
+#       match:
+#         text_contains: ["buy", "price", "quote"]
+#       actions:
+#         forward_to: [telegram]
+#         add_tags: [sales]
+
+routing:
+  # What to do when no rule matches:
+  #   keep    - Keep in original instance (default)
+  #   discard - Drop the message
+  #   forward - Forward to default_forward_to
+  default_action: keep
+  
+  # Empty rules - add your own above!
+  rules: []
+
+# =============================================================================
+# MULTI-FILE CONFIG
+# =============================================================================
+#
+# You can split config into multiple files:
+#
+# 1. File references (in this file):
+#    instances_file: instances.yaml
+#    routing_file: routing.yaml
+#    extensions_file: extensions.yaml
+#
+# 2. Inline includes:
+#    instances: !include instances.yaml
+#    routing: !include routing.yaml
+
+# =============================================================================
+# ENVIRONMENT VARIABLES
+# =============================================================================
+#
+# Use !env:VARIABLE_NAME to load secrets from environment:
+#   token: !env:TELEGRAM_BOT_TOKEN
+#   api_key: !env:API_KEY
+#
+# Set in terminal:
+#   Linux/Mac: export TELEGRAM_BOT_TOKEN="123:abc"
+#   Windows:   set TELEGRAM_BOT_TOKEN=123:abc
+
+# =============================================================================
