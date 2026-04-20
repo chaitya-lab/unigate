@@ -656,9 +656,10 @@ class RoutingEngine:
     async def _execute_code(self, message: Message, code: str, config: dict[str, Any]) -> Message:
         context = {"msg": message, "config": config}
         try:
-            exec(code, context)
+            exec(code, {"__builtins__": {}}, context)
             return context.get("msg", message)
-        except Exception:
+        except Exception as e:
+            print(f"[WARNING] Code transform failed: {e}")
             return message
 
     async def _call_handler(self, message: Message) -> Message | None:

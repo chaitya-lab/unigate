@@ -162,6 +162,35 @@ actions:
 > 
 > These are two separate systems. Transforms apply to matched messages per rule. Pipeline extensions run on all messages.
 
+### Inline Code Transform
+
+Transform message with inline Python code:
+
+```yaml
+actions:
+  transforms:
+    - code: "msg.text = (msg.text or '').upper()"
+    - code: "msg.metadata['processed'] = True"
+```
+
+**Available in code:**
+- `msg` - Full Message object
+- `config` - Transform config dict
+
+**Example - Add prefix:**
+```yaml
+transforms:
+  - code: "msg.text = '[WEB] ' + (msg.text or '')"
+```
+
+**Example - Conditional transform:**
+```yaml
+transforms:
+  - code: "msg.text = msg.text + ' [URGENT]' if 'urgent' in (msg.text or '').lower() else msg.text"
+```
+
+> **Security Note:** Code transforms use Python `eval()`. Only use with trusted configs.
+
 ---
 
 ## Examples
