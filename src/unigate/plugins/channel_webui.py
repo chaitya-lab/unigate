@@ -229,6 +229,11 @@ class WebUIChannel(BaseChannel):
     type: ClassVar[str] = "channel"
     transport: ClassVar[str] = "http"
     auth_method: ClassVar[str] = "none"
+    parameters = {
+        "title": {"type": "str", "description": "Custom title for the web UI", "default": "Unigate Web"},
+        "mount_prefix": {"type": "str", "description": "Base URL prefix for paths", "default": "/unigate"},
+        "theme": {"type": "str", "description": "UI theme: light or dark", "default": "dark"},
+    }
 
     def __init__(
         self,

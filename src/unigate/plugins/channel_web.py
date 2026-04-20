@@ -52,6 +52,13 @@ class WebChannel:
     type = "channel"
     transport = "http"
     auth_method = "api_key"
+    parameters = {
+        "webhook_secret": {"type": "str", "description": "Secret for HMAC signature verification"},
+        "signature_header": {"type": "str", "description": "Header name for signature", "default": "X-Signature"},
+        "api_key_header": {"type": "str", "description": "Header for API key", "default": "X-API-Key"},
+        "supports_groups": {"type": "bool", "description": "Support group messages", "default": True},
+        "supports_threads": {"type": "bool", "description": "Support threads", "default": False},
+    }
 
     def __init__(
         self,
