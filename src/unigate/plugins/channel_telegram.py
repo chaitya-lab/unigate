@@ -60,6 +60,13 @@ class TelegramChannel:
     type: ClassVar[str] = "channel"
     transport: ClassVar[str] = "http"
     auth_method: ClassVar[str] = "token"
+    parameters = {
+        "token": {"type": "str", "description": "Bot API token (or use store)", "required": False},
+        "mode": {"type": "str", "description": "polling or webhook", "default": "polling"},
+        "webhook_url": {"type": "str", "description": "Webhook URL (mode=webhook)"},
+        "webhook_secret": {"type": "str", "description": "Secret token for verification"},
+        "default_chat_id": {"type": "str", "description": "Default destination chat"},
+    }
 
     BASE_URL = "https://api.telegram.org"
 

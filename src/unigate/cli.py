@@ -977,6 +977,16 @@ Examples:
         help="Configuration file to validate",
     )
     
+    plug_show = plug_sub.add_parser(
+        "show",
+        help="Show plugin details",
+        description="Show plugin details including parameters",
+    )
+    plug_show.add_argument(
+        "plugin",
+        help="Plugin name to show",
+    )
+    
     args = parser.parse_args(list(argv) if argv is not None else None)
     socket_path, pid_path = get_daemon_paths()
     
@@ -1492,6 +1502,42 @@ instances:
             else:
                 print("No warnings")
             return 0
+        
+        if args.subcommand == "show":
+            full_name = registry._resolve_name(args.plugin)
+            plugins = registry.list_plugins()
+            
+            for p in plugins:
+                if p.full_name == full_name:
+                    print(f"Plugin: {p.full_name}")
+                    print(f"  Type: {p.type}")
+                    print(f"  Enabled: {p.enabled}")
+                    print(f"  Source: {p.source}")
+                    
+                    cls = registry.get_channel(p.full_name)
+                    if not cls:
+                        cls = registry.get_match(p.full_name)
+                    if not cls:
+                        cls = registry.get_transform(p.full_name)
+                    if not cls:
+                        cls = registry.get_transport(p.full_name)
+                    
+                    desc = getattr(cls, '__doc__', '') or getattr(cls, 'description', '') if cls else ''
+                    if desc:
+                        print(f"  Description: {desc.strip().split(chr(10))[0]}")
+                    
+                    if p.parameters:
+                        print(f"  Parameters:")
+                        for param in p.parameters:
+                            req = " (required)" if param.required else ""
+                            default = f" [default: {param.default}]" if param.default is not None else ""
+                            print(f"    {param.name}: {param.type}{req}{default}")
+                            if param.description:
+                                print(f"      {param.description}")
+                    return 0
+            
+            print(f"Plugin '{args.plugin}' not found", file=sys.stderr)
+            return 1
     
     return 0
 

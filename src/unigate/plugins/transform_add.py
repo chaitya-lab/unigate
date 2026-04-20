@@ -14,6 +14,9 @@ class AddMetadataTransform:
     
     name = "add_metadata"
     type = "transform"
+    parameters = {
+        "metadata": {"type": "dict", "description": "Key-value pairs to add", "required": True},
+    }
     
     async def transform(self, msg: Message, config: dict[str, Any]) -> Message:
         for key, value in config.get("metadata", {}).items():
@@ -26,6 +29,10 @@ class AddTimestampTransform:
     
     name = "add_timestamp"
     type = "transform"
+    parameters = {
+        "key": {"type": "str", "description": "Metadata key name", "default": "routed_at"},
+        "format": {"type": "str", "description": "Format: iso or unix", "default": "iso"},
+    }
     
     async def transform(self, msg: Message, config: dict[str, Any]) -> Message:
         key = config.get("key", "routed_at")
@@ -46,6 +53,9 @@ class AddPrefixTransform:
     
     name = "add_prefix"
     type = "transform"
+    parameters = {
+        "prefix": {"type": "str", "description": "Prefix to add", "required": True},
+    }
     
     async def transform(self, msg: Message, config: dict[str, Any]) -> Message:
         prefix = config.get("prefix", "")
@@ -59,6 +69,10 @@ class AddSenderTransform:
     
     name = "add_sender"
     type = "transform"
+    parameters = {
+        "where": {"type": "str", "description": "text or metadata", "default": "metadata"},
+        "format": {"type": "str", "description": "Format string", "default": "[{name}]"},
+    }
     
     async def transform(self, msg: Message, config: dict[str, Any]) -> Message:
         where = config.get("where", "metadata")
@@ -86,6 +100,9 @@ class AddTagTransform:
     
     name = "add_tag"
     type = "transform"
+    parameters = {
+        "tags": {"type": "list", "description": "Tags to add", "required": True},
+    }
     
     async def transform(self, msg: Message, config: dict[str, Any]) -> Message:
         tags = config.get("tags", [])

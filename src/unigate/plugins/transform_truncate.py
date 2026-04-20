@@ -13,6 +13,10 @@ class TruncateTransform:
     
     name = "truncate"
     type = "transform"
+    parameters = {
+        "max_length": {"type": "int", "description": "Maximum text length", "default": 160},
+        "suffix": {"type": "str", "description": "Suffix when truncated", "default": "..."},
+    }
     
     async def transform(self, msg: Message, config: dict[str, Any]) -> Message:
         max_length = config.get("max_length", 160)

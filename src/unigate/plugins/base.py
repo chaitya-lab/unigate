@@ -33,6 +33,16 @@ class PluginEntry:
 
 
 @dataclass
+class PluginParameter:
+    """Parameter schema for a plugin."""
+    name: str
+    type: str
+    description: str = ""
+    required: bool = False
+    default: Any = None
+
+
+@dataclass
 class PluginStatus:
     """Status information for a plugin."""
     name: str
@@ -41,6 +51,7 @@ class PluginStatus:
     source: str
     enabled: bool
     available: bool = True
+    parameters: list[PluginParameter] = field(default_factory=list)
 
 
 class ChannelPlugin(Protocol):
@@ -254,6 +265,24 @@ class PluginRegistry:
                 pass
         return None
     
+    def _get_parameters(self, cls: type) -> list[PluginParameter]:
+        """Extract parameters from a plugin class."""
+        params = []
+        if not cls:
+            return params
+        param_dict = getattr(cls, "parameters", None)
+        if param_dict and isinstance(param_dict, dict):
+            for name, info in param_dict.items():
+                if isinstance(info, dict):
+                    params.append(PluginParameter(
+                        name=name,
+                        type=info.get("type", "any"),
+                        description=info.get("description", ""),
+                        required=info.get("required", False),
+                        default=info.get("default"),
+                    ))
+        return params
+
     def list_plugins(self) -> list[PluginStatus]:
         """List all plugins with status."""
         status = []
@@ -265,6 +294,7 @@ class PluginRegistry:
                 type="channel",
                 source=entry.source,
                 enabled=entry.enabled,
+                parameters=self._get_parameters(entry.cls),
             ))
         
         for name, entry in self.matches.items():
@@ -274,6 +304,7 @@ class PluginRegistry:
                 type="match",
                 source=entry.source,
                 enabled=entry.enabled,
+                parameters=self._get_parameters(entry.cls),
             ))
         
         for name, entry in self.transforms.items():
@@ -283,6 +314,7 @@ class PluginRegistry:
                 type="transform",
                 source=entry.source,
                 enabled=entry.enabled,
+                parameters=self._get_parameters(entry.cls),
             ))
         
         for name, entry in self.transports.items():
@@ -292,6 +324,7 @@ class PluginRegistry:
                 type="transport",
                 source=entry.source,
                 enabled=entry.enabled,
+                parameters=self._get_parameters(entry.cls),
             ))
         
         return status

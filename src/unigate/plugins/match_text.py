@@ -14,6 +14,9 @@ class TextContainsMatcher:
     
     name = "text_contains"
     type = "match"
+    parameters = {
+        "value": {"type": "str|list", "description": "Text or list of texts to match"},
+    }
     
     def match(self, msg: Message, value: str | list[str]) -> bool:
         if not msg.text:
@@ -29,6 +32,9 @@ class TextPatternMatcher:
     
     name = "text_pattern"
     type = "match"
+    parameters = {
+        "value": {"type": "str", "description": "Regex pattern"},
+    }
     
     def match(self, msg: Message, value: str) -> bool:
         if not msg.text:
@@ -44,6 +50,9 @@ class TextStartsWithMatcher:
     
     name = "text_starts"
     type = "match"
+    parameters = {
+        "value": {"type": "str|list", "description": "Prefix or list of prefixes"},
+    }
     
     def match(self, msg: Message, value: str | list[str]) -> bool:
         if not msg.text:
@@ -58,6 +67,9 @@ class IsCommandMatcher:
     
     name = "is_command"
     type = "match"
+    parameters = {
+        "value": {"type": "bool", "description": "True=is command, False=not command", "default": True},
+    }
     
     def match(self, msg: Message, value: bool = True) -> bool:
         if not msg.text:
@@ -70,6 +82,9 @@ class SubjectContainsMatcher:
     
     name = "subject_contains"
     type = "match"
+    parameters = {
+        "value": {"type": "str|list", "description": "Text or list to match in subject"},
+    }
     
     def match(self, msg: Message, value: str | list[str]) -> bool:
         subject = msg.metadata.get("subject", "")
