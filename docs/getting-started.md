@@ -297,7 +297,7 @@ routing:
 
 ## Tutorial 4: Embedded in FastAPI
 
-Mount Unigate into an existing FastAPI application.
+Mount Unigate into an existing FastAPI application. This is useful when you want to combine Unigate with existing routes, middleware, or authentication.
 
 ### 1. Create FastAPI App
 
@@ -359,6 +359,186 @@ unigate start --config unigate.yaml
 - App: `http://localhost:8000/`
 - Unigate Status: `http://localhost:8000/unigate/status`
 - Web UI: `http://localhost:8000/unigate/web/web/`
+
+---
+
+## Tutorial 4b: Adding Authentication to Embedded Unigate
+
+When embedding Unigate in another app, you may want to protect the management routes while allowing webhooks through. Here's how to add token authentication:
+
+### 1. FastAPI App with Token Auth
+
+```python
+# myapp/main.py
+import os
+from fastapi import FastAPI, Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+from unigate import Unigate
+
+app = FastAPI(title="MyApp")
+
+
+class TokenAuthMiddleware(BaseHTTPMiddleware):
+    """Guard Unigate routes with a token query parameter.
+    
+    Usage: Add ?token=YOUR_TOKEN to access protected routes
+    """
+    
+    def __init__(self, app, token: str, paths: list[str] | None = None):
+        super().__init__(app)
+        self.token = token
+        self.paths = paths or ["/unigate"]
+    
+    async def dispatch(self, request: Request, call):
+        should_guard = any(request.url.path.startswith(p) for p in self.paths)
+        
+        if should_guard:
+            # Allow webhooks through (they verify their own signatures)
+            if request.url.path.startswith("/unigate/web/"):
+                return await call(request)
+            
+            query_token = request.query_params.get("token")
+            if query_token != self.token:
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "Invalid or missing token"}
+                )
+        
+        return await call(request)
+
+
+# Load Unigate
+gate = Unigate.from_config("unigate.yaml")
+
+# Add auth middleware (get token from env)
+app.add_middleware(
+    TokenAuthMiddleware,
+    token=os.getenv("UNIGATE_TOKEN", "secret123"),
+    paths=["/unigate"]
+)
+
+# Mount Unigate
+gate.mount_to_app(app, prefix="/unigate")
+```
+
+### 2. Using Protected Routes
+
+```bash
+# Without token - returns 401
+curl http://localhost:8000/unigate/status
+
+# With token - works
+curl http://localhost:8000/unigate/status?token=secret123
+
+# Webhook (no token needed) - works
+curl -X POST http://localhost:8000/unigate/web/myinstance \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hello"}'
+```
+
+### 3. Full Integration with Your App's Auth
+
+You can also integrate with your existing authentication:
+
+```python
+from fastapi import Depends
+from fastapi.security import HTTPBearer
+
+security = HTTPBearer()
+
+class MyAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call):
+        should_guard = any(request.url.path.startswith(p) for p in ["/unigate"])
+        
+        if should_guard:
+            # Skip auth for webhooks
+            if request.url.path.startswith("/unigate/web/"):
+                return await call(request)
+            
+            # Use your existing auth logic
+            # e.g., check session, JWT, API key, etc.
+            if not is_authenticated(request):
+                return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+        
+        return await call(request)
+```
+
+### 4. Adding Custom Message Handlers
+
+You can also add handlers when embedding:
+
+```python
+from unigate import Unigate, Message
+
+gate = Unigate.from_config("unigate.yaml")
+
+@gate.on_message
+async def handle_message(msg: Message) -> Message:
+    """Process every message that passes through Unigate."""
+    print(f"Got message: {msg.text}")
+    return msg  # Continue routing
+
+@gate.on_event("health.degraded")
+async def handle_degraded(event):
+    """Handle instance health events."""
+    print(f"Instance degraded: {event.payload}")
+
+gate.mount_to_app(app, prefix="/unigate")
+```
+
+### 5. Full Example: Complete FastAPI App
+
+```python
+# myapp/main.py
+import os
+from fastapi import FastAPI, Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+from unigate import Unigate, Message
+
+app = FastAPI(title="MyApp")
+
+
+class TokenAuthMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, token: str, paths: list[str] | None = None):
+        super().__init__(app)
+        self.token = token
+        self.paths = paths or ["/unigate"]
+    
+    async def dispatch(self, request: Request, call):
+        should_guard = any(request.url.path.startswith(p) for p in self.paths)
+        
+        if should_guard:
+            if request.url.path.startswith("/unigate/web/"):
+                return await call(request)
+            if request.query_params.get("token") != self.token:
+                return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+        
+        return await call(request)
+
+
+# Load Unigate
+gate = Unigate.from_config("unigate.yaml")
+
+# Add message handler
+@gate.on_message
+async def process_message(msg: Message) -> Message:
+    # Your custom logic here
+    if "help" in (msg.text or "").lower():
+        msg.metadata["auto_reply"] = True
+    return msg
+
+# Add auth middleware
+app.add_middleware(
+    TokenAuthMiddleware,
+    token=os.getenv("UNIGATE_TOKEN", "secret"),
+    paths=["/unigate"]
+)
+
+# Mount
+gate.mount_to_app(app, prefix="/unigate")
+```
 
 ---
 
