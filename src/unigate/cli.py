@@ -181,6 +181,34 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
         
         return {"ok": True, "instances": results}
 
+    if cmd == "instances_reload":
+        instance_id = args.get("instance_id")
+        reset = args.get("reset", False)
+        if not instance_id:
+            return {"error": "instance_id required"}
+        if instance_id not in _daemon_exchange.instances:
+            return {"error": f"instance '{instance_id}' not found"}
+        
+        runtime = _daemon_exchange.instances[instance_id]
+        channel = runtime.channel
+        
+        try:
+            if reset and hasattr(channel, "reset_setup"):
+                await channel.reset_setup()
+            
+            if hasattr(channel, "setup"):
+                result = await channel.setup()
+                if result.status.name == "READY":
+                    runtime.state = "active"
+                    return {"ok": True, "message": f"Setup successful"}
+                elif result.status.name == "NEEDS_INTERACTION":
+                    return {"ok": True, "message": f"Setup needs interaction: {result.message}"}
+                else:
+                    return {"ok": False, "error": f"Setup failed: {result.message}"}
+            return {"ok": False, "error": "No setup method"}
+        except Exception as e:
+            return {"error": str(e)}
+
     if cmd == "reload":
         config_path = args.get("config_path", "unigate.yaml")
         try:
@@ -734,6 +762,21 @@ Examples:
         "--force", "-f",
         action="store_true",
         help="Force fresh health check instead of using cached result",
+    )
+    
+    inst_reload = inst_sub.add_parser(
+        "reload",
+        help="Reload an instance",
+        description="Reload instance config and re-run setup (for token changes)",
+    )
+    inst_reload.add_argument(
+        "instance_id",
+        help="Instance name to reload",
+    )
+    inst_reload.add_argument(
+        "--reset", "-r",
+        action="store_true",
+        help="Reset credentials before reloading",
     )
     
     # Inbox command
@@ -1399,6 +1442,18 @@ instances:
                     if instances:
                         healthy = sum(1 for i in instances.values() if i.get("status") == "healthy")
                         print(f"\n{healthy}/{len(instances)} instances healthy")
+                else:
+                    print(f"Error: {response.get('error', 'unknown')}", file=sys.stderr)
+                    return 1
+            elif args.subcommand == "reload":
+                response = send_daemon_command({
+                    "command": "instances_reload",
+                    "args": {"instance_id": args.instance_id, "reset": args.reset},
+                })
+                if response.get("ok"):
+                    print(f"Reloaded: {args.instance_id}")
+                    if response.get("message"):
+                        print(f"  {response.get('message')}")
                 else:
                     print(f"Error: {response.get('error', 'unknown')}", file=sys.stderr)
                     return 1
