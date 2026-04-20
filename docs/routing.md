@@ -51,26 +51,65 @@ routing:
     - name: my-rule              # Required: unique name
       priority: 100             # Lower = higher priority (checked first)
       enabled: true             # Can be false to disable
-      match:                    # Match conditions (all optional, AND logic)
-        from_instance: web_ui
-        text_contains: "keyword"
-        text_pattern: "regex.*pattern"
-        sender_id: "user123"
-        sender_pattern: "vip_*"
-        sender_name_contains: "John"
-        group_id: "dev-channel"
-        has_media: true
-        has_attachment: true
-        has_image: true
-        has_video: true
-        day_of_week: monday     # or [monday, tuesday, ...]
-        hour_of_day: 9          # or [9, 10, 11, 12, 13, 14, 15, 16, 17]
+      match:                    # Match conditions (three syntaxes below)
       actions:
         forward_to: [instance1, instance2]  # Where to send
         keep_in_default: false   # Also send to default destination
         add_tags: [tag1, tag2]  # Tags for tracking
         extensions: []          # Transforms to apply
 ```
+
+## Match Syntax
+
+UniGate supports three match syntaxes:
+
+### 1. Simple (Key-Value)
+
+```yaml
+match:
+  from_instance: web
+  sender_id: "123456"
+  text_contains: "urgent"
+```
+
+All conditions = AND logic (all must match).
+
+### 2. Type-Based (List of Conditions)
+
+```yaml
+match:
+  - type: sender_id
+    op: in
+    value: ["123", "456", "789"]
+  - type: text
+    op: contains
+    value: "urgent"
+```
+
+**Operators:**
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `eq` | Equal | `value: "123"` |
+| `ne` | Not equal | `value: "123"` |
+| `contains` | Contains substring | `value: "urgent"` |
+| `startswith` | Starts with | `value: "vip_"` |
+| `endswith` | Ends with | `value: "_admin"` |
+| `in` | In list | `value: ["a", "b", "c"]` |
+| `regex` | Regex pattern | `value: "^\\d{4}$"` |
+| `gt` | Greater than | `value: 100` |
+| `lt` | Less than | `value: 50` |
+| `exists` | Field exists | `value: true` |
+
+**Field Types:** Use any message field (e.g., `sender_id`, `sender.name`, `metadata.key`, `raw.update_id`)
+
+### 3. Code (Python Expression)
+
+```yaml
+match:
+  code: "msg.sender.platform_id == '123' or 'urgent' in (msg.text or '')"
+```
+
+Available: `msg` (Message object), `msg.sender.platform_id`, `msg.text`, `msg.metadata`, etc.
 
 ## Match Conditions
 
