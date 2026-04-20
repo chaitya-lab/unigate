@@ -107,8 +107,11 @@ class SMSChannel(BaseChannel):
     def _degrade_interactive(self, msg: Message) -> Message:
         """Convert interactive to text message.
         
-        When SMS sends interactive, we convert to text like:
-        "CONTINUE? (yes/no)"
+        Handles several degradation patterns:
+        
+        1. Confirm: "Continue? (yes/no)"
+        2. Select: "Choose: 1. Option A / 2. Option B / 3. Option C"
+        3. Text input: "Enter your message and send"
         
         We also store the interaction_id in metadata so when user replies,
         we can look it up and restore the interactive response.
@@ -116,13 +119,41 @@ class SMSChannel(BaseChannel):
         if not msg.interactive:
             return msg
         
-        prompt = msg.interactive.prompt
-        if msg.interactive.options:
-            prompt = f"{prompt} ({'/'.join(msg.interactive.options)})"
+        interaction = msg.interactive
+        prompt = interaction.prompt
+        
+        # Handle different interaction types
+        if interaction.type == "confirm":
+            options = interaction.options or ["yes", "no"]
+            prompt = f"{prompt} ({'/'.join(options)})"
+            
+        elif interaction.type == "select" or interaction.type == "multi_select":
+            if interaction.options:
+                # Numbered options: "1. Option A / 2. Option B"
+                numbered = [f"{i+1}. {opt}" for i, opt in enumerate(interaction.options)]
+                prompt = f"{prompt}: {' / '.join(numbered)}"
+            else:
+                prompt = f"{prompt} (enter your response)"
+                
+        elif interaction.type == "text_input":
+            prompt = f"{prompt} (reply with text)"
+            
+        elif interaction.type == "password":
+            prompt = f"{prompt} (send password)"
+            
+        elif interaction.type == "number":
+            if interaction.min_value and interaction.max_value:
+                prompt = f"{prompt} ({interaction.min_value}-{interaction.max_value})"
+            else:
+                prompt = f"{prompt} (send number)"
+                
+        else:
+            # Generic fallback
+            prompt = f"{prompt} (reply)"
         
         # Truncate if needed
         if len(prompt) > SMS_MAX_LENGTH - 10:
-            prompt = prompt[:SMS_MAX_LENGTH - 10]
+            prompt = prompt[:SMS_MAX_LENGTH - 10] + ".."
         
         return Message(
             id=msg.id,
