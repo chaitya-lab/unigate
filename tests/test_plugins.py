@@ -10,6 +10,17 @@ from unigate.plugins.base import get_registry, PluginRegistry, resolve_type
 class TestPluginRegistry:
     """Test unified plugin registry."""
 
+    @pytest.fixture(autouse=True)
+    def load_plugins(self):
+        """Load plugins before each test."""
+        from unigate.plugins.base import register_plugin_dirs
+        import os
+        # From tests/ directory, go up to project root, then to src/unigate/plugins
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        plugin_path = os.path.join(root, "src", "unigate", "plugins")
+        if os.path.isdir(plugin_path) and "channel_webui.py" in os.listdir(plugin_path):
+            register_plugin_dirs([plugin_path])
+
     def test_registry_singleton(self):
         registry1 = get_registry()
         registry2 = get_registry()

@@ -382,63 +382,28 @@ _global_registry: PluginRegistry | None = None
 
 
 def get_registry() -> PluginRegistry:
-    """Get the global plugin registry."""
+    """Get the global plugin registry.
+    
+    Plugins are loaded when register_plugin_dirs() is called with config.
+    By default, registry is empty until plugin_dirs are configured.
+    """
     global _global_registry
     if _global_registry is None:
         _global_registry = PluginRegistry()
-        _load_builtins(_global_registry)
     return _global_registry
 
 
 def _load_builtins(registry: PluginRegistry) -> None:
-    """Load built-in plugins."""
-    from .channel_web import WebChannel
-    from .channel_telegram import TelegramChannel
-    from .channel_whatsapp import WhatsAppChannel
-    from .channel_webui import WebUIChannel
-    from .channel_fake_sms import FakeSMSChannel
-    from .match_from import FromMatcher
-    from .match_text import TextContainsMatcher, TextPatternMatcher
-    from .match_sender import SenderMatcher, SenderPatternMatcher
-    from .match_media import HasMediaMatcher, HasAttachmentMatcher
-    from .match_time import DayOfWeekMatcher, HourOfDayMatcher
-    from .transform_truncate import TruncateTransform
-    from .transform_extract import ExtractSubjectTransform
-    from .transform_add import AddMetadataTransform, AddTimestampTransform
-    from .transform_case import UppercaseTransform, LowercaseTransform, TitleCaseTransform
-    from .transport_http import HTTPTransport
-    from .transport_websocket import WebSocketTransport
-    from .transport_ftp import FTPTransport, SFTPTransport, FileTransport
+    """Load built-in plugins from config plugin_dirs.
     
-    for cls in [
-        WebChannel,
-        TelegramChannel,
-        WhatsAppChannel,
-        WebUIChannel,
-        FakeSMSChannel,
-        FromMatcher,
-        TextContainsMatcher,
-        TextPatternMatcher,
-        SenderMatcher,
-        SenderPatternMatcher,
-        HasMediaMatcher,
-        HasAttachmentMatcher,
-        DayOfWeekMatcher,
-        HourOfDayMatcher,
-        TruncateTransform,
-        ExtractSubjectTransform,
-        AddMetadataTransform,
-        AddTimestampTransform,
-        UppercaseTransform,
-        LowercaseTransform,
-        TitleCaseTransform,
-        HTTPTransport,
-        WebSocketTransport,
-        FTPTransport,
-        SFTPTransport,
-        FileTransport,
-    ]:
-        registry.register(cls, "builtin")
+    All plugins now come from plugin_dirs in config, not hardcoded.
+    To use built-ins, add to config:
+    
+    unigate:
+      plugin_dirs:
+        - ./src/unigate/plugins
+    """
+    pass  # No hardcoded plugins - all from plugin_dirs
 
 
 def register_plugin_dirs(directories: list[str]) -> None:
@@ -457,8 +422,10 @@ def register_plugin_dirs(directories: list[str]) -> None:
             _load_plugin_file(registry, file_path)
 
 
-def _load_plugin_file(registry: PluginRegistry, file_path: Path) -> None:
+def _load_plugin_file(registry: PluginRegistry, file_path: Path | str) -> None:
     """Load plugins from a single file."""
+    if isinstance(file_path, str):
+        file_path = Path(file_path)
     module_name = file_path.stem
     
     try:
@@ -467,6 +434,9 @@ def _load_plugin_file(registry: PluginRegistry, file_path: Path) -> None:
             return
         
         module = importlib.util.module_from_spec(spec)
+        # Fix relative imports by setting package
+        module.__package__ = "unigate.plugins"
+        module.__file__ = str(file_path)
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
         

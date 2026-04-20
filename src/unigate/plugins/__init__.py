@@ -3,6 +3,13 @@
 All plugins operate on the universal Message format.
 Plugin types: channel, match, transform, transport
 Naming: type.name (e.g., channel.telegram, match.text_contains)
+
+Plugins are loaded via get_registry() from plugin_dirs in config:
+    
+    unigate:
+      plugin_dirs:
+        - ./src/unigate/plugins  # built-in plugins
+        - ./my_custom_plugins   # your own plugins
 """
 
 from .base import (
@@ -19,8 +26,9 @@ from .base import (
     resolve_type,
 )
 
-from .channel_web import WebChannelPlugin, WebChannel, APIKeyWebChannel, BearerTokenWebChannel
-from .channel_telegram import TelegramChannelPlugin, TelegramChannel
+# Re-export common plugins for convenience
+from .channel_telegram import TelegramChannel, TelegramChannelPlugin
+from .channel_web import WebChannel, WebChannelPlugin, APIKeyWebChannel, BearerTokenWebChannel
 from .channel_webui import WebUIChannel
 from .channel_fake_sms import FakeSMSChannel
 from .match_from import FromMatcher, FromPatternMatcher
@@ -31,7 +39,10 @@ from .match_time import DayOfWeekMatcher, HourOfDayMatcher, TimeRangeMatcher
 from .transform_truncate import TruncateTransform, Truncate160Transform
 from .transform_extract import ExtractSubjectTransform, EmailSubjectOnlyTransform, ExtractPatternTransform
 from .transform_add import AddMetadataTransform, AddTimestampTransform, AddPrefixTransform, AddSenderTransform, AddTagTransform
+from .transform_case import UppercaseTransform, LowercaseTransform, TitleCaseTransform
 from .transport_http import HTTPTransport, WebhookTransport
+from .transport_websocket import WebSocketTransport
+from .transport_ftp import FTPTransport, SFTPTransport, FileTransport
 
 __all__ = [
     "PluginRegistry",
@@ -45,13 +56,14 @@ __all__ = [
     "get_registry",
     "register_plugin_dirs",
     "resolve_type",
-    "WebChannelPlugin",
-    "TelegramChannelPlugin",
     "TelegramChannel",
+    "TelegramChannelPlugin",
     "WebChannel",
+    "WebChannelPlugin",
     "APIKeyWebChannel",
     "BearerTokenWebChannel",
     "WebUIChannel",
+    "FakeSMSChannel",
     "FromMatcher",
     "FromPatternMatcher",
     "TextContainsMatcher",
@@ -81,8 +93,13 @@ __all__ = [
     "AddPrefixTransform",
     "AddSenderTransform",
     "AddTagTransform",
+    "UppercaseTransform",
+    "LowercaseTransform",
+    "TitleCaseTransform",
     "HTTPTransport",
     "WebhookTransport",
+    "WebSocketTransport",
+    "FTPTransport",
+    "SFTPTransport",
+    "FileTransport",
 ]
-
-__version__ = "0.1.0"

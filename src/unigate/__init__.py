@@ -41,20 +41,32 @@ from .plugins import (
     get_registry,
     register_plugin_dirs,
     resolve_type,
-    TelegramChannel,
-    WebChannel,
-    APIKeyWebChannel,
-    BearerTokenWebChannel,
-    WebUIChannel,
-    FromMatcher,
-    TextContainsMatcher,
-    SenderMatcher,
-    HasMediaMatcher,
-    TruncateTransform,
-    ExtractSubjectTransform,
-    AddMetadataTransform,
-    HTTPTransport,
 )
+
+# Lazy loading for common plugins - import when needed
+# Example: from unigate import TelegramChannel
+def __getattr__(name):
+    lazy_plugins = {
+        "TelegramChannel": ".plugins.channel_telegram",
+        "WebChannel": ".plugins.channel_web",
+        "APIKeyWebChannel": ".plugins.channel_web",
+        "BearerTokenWebChannel": ".plugins.channel_web",
+        "WebUIChannel": ".plugins.channel_webui",
+        "FromMatcher": ".plugins.match_from",
+        "TextContainsMatcher": ".plugins.match_text",
+        "SenderMatcher": ".plugins.match_sender",
+        "HasMediaMatcher": ".plugins.match_media",
+        "TruncateTransform": ".plugins.transform_truncate",
+        "ExtractSubjectTransform": ".plugins.transform_extract",
+        "AddMetadataTransform": ".plugins.transform_add",
+        "HTTPTransport": ".plugins.transport_http",
+    }
+    if name in lazy_plugins:
+        from importlib import import_module
+        module_path = lazy_plugins[name]
+        module = import_module(module_path, __package__)
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 from .resilience import CircuitBreaker, CircuitState, RetryPolicy
 from .routing import RoutingEngine, RoutingRule, MatchCondition, RoutingAction, RuleMatcher
 from .runtime import UnigateASGIApp
