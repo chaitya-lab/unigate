@@ -206,15 +206,13 @@ class RoutingRule:
         if self.match is None:
             return True
         
-        # Handle code-based matching
+        # Handle code-based matching ONLY
         if self.match.code:
-            if RuleMatcher.match_code(message, self.match.code):
-                return True
+            return RuleMatcher.match_code(message, self.match.code)
         
-        # Handle type-based conditions
+        # Handle type-based conditions ONLY
         if self.match.conditions:
-            if RuleMatcher.match_conditions(message, self.match.conditions):
-                return True
+            return RuleMatcher.match_conditions(message, self.match.conditions)
         
         # Original simple matching
         if self.match.matches_everything():
@@ -305,11 +303,11 @@ class RuleMatcher:
         Example: "msg.sender.platform_id == '123' or 'urgent' in (msg.text or '')"
         """
         if not code:
-            return True
+            return False
         try:
             context = {"msg": message, "config": {}}
-            result = exec(code, context)
-            return bool(result) if result is not None else True
+            result = eval(code, {"__builtins__": {}}, context)
+            return bool(result) if result is not None else False
         except Exception:
             return False
     
@@ -440,6 +438,18 @@ class RuleMatcher:
         elif key == "has_media":
             media = getattr(message, "media", None) or []
             return (len(media) > 0) == value
+        elif key == "has_attachment":
+            media = getattr(message, "media", None) or []
+            has_attachment = any(m.type == "file" for m in media) if media else False
+            return has_attachment == value
+        elif key == "has_image":
+            media = getattr(message, "media", None) or []
+            has_image = any(m.type == "image" for m in media) if media else False
+            return has_image == value
+        elif key == "has_video":
+            media = getattr(message, "media", None) or []
+            has_video = any(m.type == "video" for m in media) if media else False
+            return has_video == value
         return True
 
 
