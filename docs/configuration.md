@@ -498,7 +498,7 @@ routing:
 | `text_starts_with` | `"/"` | Text starts with |
 | `sender` | `"user123"` | Exact sender ID |
 | `sender_pattern` | `"vip_*"` | Glob pattern for sender |
-| `sender_name` | `"John"` | Sender display name |
+| `sender_name_contains` | `"John"` | Sender name contains |
 | `sender_domain` | `"@company.com"` | Email domain |
 | `group_id` | `"support"` | Group ID |
 | `has_media` | `true` | Has attachments |
