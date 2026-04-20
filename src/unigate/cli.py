@@ -605,6 +605,13 @@ Examples:
         description="Show current daemon status, uptime, and instance count",
     )
     
+    # Version command
+    version_parser = sub.add_parser(
+        "version",
+        help="Show unigate version",
+        description="Show UniGate version and plugin compatibility info",
+    )
+    
     # Health command
     health_parser = sub.add_parser(
         "health",
@@ -1316,6 +1323,23 @@ instances:
                 "daemon": "not running",
                 "instances": list(exchange.instances.keys()),
             }, indent=2))
+        return 0
+    
+    if args.command == "version":
+        from unigate import __version__, check_version_compatible
+        print(f"UniGate version: {__version__}")
+        # Check plugin compatibility
+        if socket_path.exists():
+            response = send_daemon_command({"command": "plugins_list"})
+            plugins = response.get("plugins", [])
+            issues = []
+            for p in plugins:
+                pv = p.get("min_version", "")
+                if pv and not check_version_compatible(pv):
+                    issues.append(f"  - {p.get('name')}: requires {pv}")
+            if issues:
+                print("Compatibility warnings:")
+                print("\n".join(issues))
         return 0
     
     if args.command == "health":

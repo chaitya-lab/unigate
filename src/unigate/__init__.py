@@ -1,6 +1,7 @@
 """Public package surface for the 1.5 rewrite."""
 
 from .capabilities import ChannelCapabilities
+from .version import __version__, check_version_compatible
 from .adapters import FakeWebhookAdapter, InternalAdapter
 from .channel import BaseChannel, KernelHandle, RawRequest, SecureStore, SendResult
 from .cli import main

@@ -30,6 +30,8 @@ class PluginEntry:
     source: str
     enabled: bool = True
     description: str = ""
+    version: str = "1.0"  # Plugin version for compatibility
+    min_version: str = ""  # Minimum UniGate version required
 
 
 @dataclass
@@ -51,6 +53,8 @@ class PluginStatus:
     source: str
     enabled: bool
     available: bool = True
+    version: str = "1.0"
+    min_version: str = ""
     parameters: list[PluginParameter] = field(default_factory=list)
 
 
@@ -128,18 +132,29 @@ class PluginRegistry:
         plugin_type = getattr(cls, "type", None)
         name = getattr(cls, "name", None)
         description = getattr(cls, "description", "")
+        plugin_version = getattr(cls, "version", "1.0")
+        min_version = getattr(cls, "min_version", "")
         
         if not name:
             return
         
+        # Check version compatibility
+        from unigate.version import check_version_compatible
+        if min_version and not check_version_compatible(min_version):
+            self._warnings.append(
+                f"Plugin '{name}' requires UniGate version >= {min_version}, "
+                f"current is {'.'.join(str(v) for v in [0,2,1])}"
+            )
+            return
+        
         if plugin_type == "channel":
-            self._register_to_dict(self.channels, name, plugin_type, cls, source, description)
+            self._register_to_dict(self.channels, name, plugin_type, cls, source, description, plugin_version, min_version)
         elif plugin_type == "match":
-            self._register_to_dict(self.matches, name, plugin_type, cls, source, description)
+            self._register_to_dict(self.matches, name, plugin_type, cls, source, description, plugin_version, min_version)
         elif plugin_type == "transform":
-            self._register_to_dict(self.transforms, name, plugin_type, cls, source, description)
+            self._register_to_dict(self.transforms, name, plugin_type, cls, source, description, plugin_version, min_version)
         elif plugin_type == "transport":
-            self._register_to_dict(self.transports, name, plugin_type, cls, source, description)
+            self._register_to_dict(self.transports, name, plugin_type, cls, source, description, plugin_version, min_version)
     
     def _register_to_dict(
         self, 
@@ -148,7 +163,9 @@ class PluginRegistry:
         plugin_type: str,
         cls: type,
         source: str,
-        description: str
+        description: str,
+        version: str = "1.0",
+        min_version: str = ""
     ) -> None:
         """Register plugin to dict with conflict detection."""
         full_name = self._get_full_name(name, plugin_type)
@@ -166,7 +183,7 @@ class PluginRegistry:
                     f"Duplicate plugin '{full_name}' (already registered from '{existing.source}')"
                 )
         else:
-            registry[full_name] = PluginEntry(cls, source, True, description)
+            registry[full_name] = PluginEntry(cls, source, True, description, version, min_version)
     
     def enable(self, name: str) -> bool:
         """Enable a plugin by name."""
@@ -294,6 +311,8 @@ class PluginRegistry:
                 type="channel",
                 source=entry.source,
                 enabled=entry.enabled,
+                version=entry.version,
+                min_version=entry.min_version,
                 parameters=self._get_parameters(entry.cls),
             ))
         
@@ -304,6 +323,8 @@ class PluginRegistry:
                 type="match",
                 source=entry.source,
                 enabled=entry.enabled,
+                version=entry.version,
+                min_version=entry.min_version,
                 parameters=self._get_parameters(entry.cls),
             ))
         
@@ -314,6 +335,8 @@ class PluginRegistry:
                 type="transform",
                 source=entry.source,
                 enabled=entry.enabled,
+                version=entry.version,
+                min_version=entry.min_version,
                 parameters=self._get_parameters(entry.cls),
             ))
         
@@ -324,6 +347,8 @@ class PluginRegistry:
                 type="transport",
                 source=entry.source,
                 enabled=entry.enabled,
+                version=entry.version,
+                min_version=entry.min_version,
                 parameters=self._get_parameters(entry.cls),
             ))
         

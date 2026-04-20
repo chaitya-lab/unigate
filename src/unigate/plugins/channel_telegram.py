@@ -60,6 +60,8 @@ class TelegramChannel:
     type: ClassVar[str] = "channel"
     transport: ClassVar[str] = "http"
     auth_method: ClassVar[str] = "token"
+    version: ClassVar[str] = "1.0"
+    min_version: ClassVar[str] = "0.2.0"
     parameters = {
         "token": {"type": "str", "description": "Bot API token (or use store)", "required": False},
         "mode": {"type": "str", "description": "polling or webhook", "default": "polling"},
