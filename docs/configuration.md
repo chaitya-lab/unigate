@@ -143,6 +143,46 @@ unigate plugins disable telegram    # Deactivate plugin
 
 ---
 
+## Instance Lifecycle States
+
+Instances have lifecycle states that indicate their current status:
+
+| State | Description |
+|-------|-------------|
+| `active` | Instance is running and healthy |
+| `degraded` | Instance is running but has issues (e.g., auth problems) |
+| `reconnecting` | Attempting to recover from errors |
+| `setup_required` | Needs user interaction (e.g., auth token) |
+| `disabled` | Manually disabled |
+
+### Health Checks
+
+UniGate runs automatic health checks every 60 seconds when running as a daemon. Channels report:
+
+- **healthy** - Channel can send/receive
+- **unhealthy** - Auth failed or channel down
+- **unknown** - Not configured
+
+```bash
+# Check instance health
+unigate instances health telegram
+```
+
+If an instance becomes unhealthy, UniGate will:
+1. Update state to `degraded`
+2. Continue routing messages (may fail)
+3. Emit `health.degraded` events
+
+### Manual Health Check
+
+Force a fresh health check:
+
+```bash
+unigate instances health telegram --force
+```
+
+---
+
 ## `unigate` Section
 
 Global settings for the unigate server.

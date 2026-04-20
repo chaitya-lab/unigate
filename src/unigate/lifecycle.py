@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -43,3 +44,14 @@ class SetupResult:
     interaction_type: str | None = None
     interaction_data: dict[str, Any] = field(default_factory=dict)
     message: str | None = None
+
+
+@dataclass(slots=True)
+class HealthCheckResult:
+    """Detailed health check result with reason."""
+
+    status: HealthStatus
+    message: str | None = None
+    last_check: datetime | None = None
+    consecutive_failures: int = 0
+    details: dict[str, Any] = field(default_factory=dict)

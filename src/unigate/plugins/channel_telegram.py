@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 from ..capabilities import ChannelCapabilities
 from ..channel import BaseChannel, RawRequest, SendResult
 from ..events import KernelEvent
-from ..lifecycle import HealthStatus, SetupResult, SetupStatus
+from ..lifecycle import HealthCheckResult, HealthStatus, SetupResult, SetupStatus
 from ..message import Action, Message, Sender
 from ..stores import SecureStore
 
@@ -321,11 +321,39 @@ class TelegramChannel:
     async def reset_setup(self) -> None:
         self._token = None
 
-    async def health_check(self) -> HealthStatus:
+    async def health_check(self) -> HealthCheckResult:
+        from datetime import datetime, timezone
         if not self._token:
-            return HealthStatus.UNKNOWN
+            return HealthCheckResult(
+                status=HealthStatus.UNKNOWN,
+                message="No token configured",
+                last_check=datetime.now(timezone.utc),
+                details={"auth_configured": False},
+            )
         result = await self._api_call("getMe")
-        return HealthStatus.HEALTHY if result.get("ok") else HealthStatus.UNHEALTHY
+        if result.get("ok"):
+            return HealthCheckResult(
+                status=HealthStatus.HEALTHY,
+                message="Bot is active and responding",
+                last_check=datetime.now(timezone.utc),
+                details={
+                    "auth_configured": True,
+                    "bot_name": result.get("result", {}).get("first_name"),
+                    "bot_id": result.get("result", {}).get("id"),
+                },
+            )
+        error_code = result.get("error_code", "")
+        error_msg = result.get("description", "Unknown error")
+        return HealthCheckResult(
+            status=HealthStatus.UNHEALTHY,
+            message=f"API error: {error_msg}",
+            last_check=datetime.now(timezone.utc),
+            details={
+                "auth_configured": True,
+                "error_code": error_code,
+                "error_message": error_msg,
+            },
+        )
 
     async def background_tasks(self) -> list[object]:
         return []

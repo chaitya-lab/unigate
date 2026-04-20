@@ -12,7 +12,7 @@ from typing import Any, ClassVar
 from ..capabilities import ChannelCapabilities
 from ..channel import BaseChannel, RawRequest, SendResult
 from ..events import KernelEvent
-from ..lifecycle import HealthStatus, SetupResult, SetupStatus
+from ..lifecycle import HealthCheckResult, HealthStatus, SetupResult, SetupStatus
 from ..message import Message, Sender
 from ..stores import SecureStore
 
@@ -459,15 +459,38 @@ class WhatsAppChannel(BaseChannel):
         self._phone_number_id = None
         self._access_token = None
     
-    async def health_check(self) -> HealthStatus:
+    async def health_check(self) -> HealthCheckResult:
+        from datetime import datetime, timezone
         if not self._access_token:
-            return HealthStatus.UNKNOWN
+            return HealthCheckResult(
+                status=HealthStatus.UNKNOWN,
+                message="No access token configured",
+                last_check=datetime.now(timezone.utc),
+                details={"auth_configured": False},
+            )
         
         result = await self._api_call("GET", None)
         if "error" in result:
-            return HealthStatus.UNHEALTHY
+            error_msg = result.get("error", {}).get("message", "Unknown error")
+            return HealthCheckResult(
+                status=HealthStatus.UNKNOWN,
+                message=f"API error: {error_msg}",
+                last_check=datetime.now(timezone.utc),
+                details={
+                    "auth_configured": True,
+                    "error": result.get("error", {}),
+                },
+            )
         
-        return HealthStatus.HEALTHY
+        return HealthCheckResult(
+            status=HealthStatus.HEALTHY,
+            message="WhatsApp Business API is active",
+            last_check=datetime.now(timezone.utc),
+            details={
+                "auth_configured": True,
+                "phone_number_id": self._phone_number_id,
+            },
+        )
     
     async def background_tasks(self) -> list[object]:
         return []

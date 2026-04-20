@@ -13,7 +13,7 @@ from uuid import uuid4
 from ..capabilities import ChannelCapabilities
 from ..channel import BaseChannel, RawRequest, SendResult
 from ..events import KernelEvent
-from ..lifecycle import HealthStatus, SetupResult, SetupStatus
+from ..lifecycle import HealthCheckResult, HealthStatus, SetupResult, SetupStatus
 from ..message import Message, Sender
 from ..stores import SecureStore
 
@@ -146,8 +146,21 @@ class WebChannel:
     async def reset_setup(self) -> None:
         pass
 
-    async def health_check(self) -> HealthStatus:
-        return HealthStatus.HEALTHY if self._started else HealthStatus.UNKNOWN
+    async def health_check(self) -> HealthCheckResult:
+        from datetime import datetime, timezone
+        if not self._started:
+            return HealthCheckResult(
+                status=HealthStatus.UNKNOWN,
+                message="Channel not started",
+                last_check=datetime.now(timezone.utc),
+                details={"running": False},
+            )
+        return HealthCheckResult(
+            status=HealthStatus.HEALTHY,
+            message="Channel is serving",
+            last_check=datetime.now(timezone.utc),
+            details={"running": True},
+        )
 
     async def background_tasks(self) -> list[object]:
         return []

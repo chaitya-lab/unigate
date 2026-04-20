@@ -276,6 +276,39 @@ unigate instances disable INSTANCE_ID
 unigate instances disable whatsapp
 ```
 
+### `instances health`
+
+Check health status of one or more instances. Shows if channels can send/receive messages.
+
+```bash
+unigate instances health [INSTANCE_ID ...] [--force]
+```
+
+**Options:**
+- `INSTANCE_ID` - Specific instance(s) to check (checks all if omitted)
+- `--force, -f` - Force fresh health check
+
+**Examples:**
+
+```bash
+# Check all instances
+unigate instances health
+
+# Check specific instance
+unigate instances health telegram
+
+# Check multiple instances
+unigate instances health telegram whatsapp
+
+# Force fresh check (bypass cache)
+unigate instances health telegram --force
+```
+
+**Output shows:**
+- `healthy` - Channel is working
+- `unhealthy` - Auth failed or channel down
+- `unknown` - Not configured or cannot determine
+
 ### `instances restart`
 
 Restart a specific instance.

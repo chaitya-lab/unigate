@@ -488,8 +488,14 @@ class WebUIChannel(BaseChannel):
             max_message_length=4096,
         )
 
-    async def health_check(self) -> HealthStatus:
-        return HealthStatus.HEALTHY
+    async def health_check(self) -> HealthCheckResult:
+        from datetime import datetime, timezone
+        return HealthCheckResult(
+            status=HealthStatus.HEALTHY,
+            message="WebUI is configured",
+            last_check=datetime.now(timezone.utc),
+            details={"running": True},
+        )
 
     async def background_tasks(self) -> list[object]:
         return []

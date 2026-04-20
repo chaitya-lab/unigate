@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any, Callable
 
 from .channel import BaseChannel
-from .lifecycle import HealthStatus, InstanceState, SetupResult, SetupStatus
+from .lifecycle import HealthCheckResult, HealthStatus, InstanceState, SetupResult, SetupStatus
 from .resilience import CircuitBreaker
 
 
@@ -122,16 +122,29 @@ class InstanceManager:
         runtime = self.instances[instance_id]
         old_state = runtime.state.value
         try:
-            health = await runtime.channel.health_check()
+            result = await runtime.channel.health_check()
+            if isinstance(result, HealthCheckResult):
+                health = result.status
+                runtime.last_error = result.message
+            else:
+                health = result
         except Exception:
             runtime.state = InstanceState.RECONNECTING
             runtime.updated_at = datetime.now(UTC)
             runtime._notify_state_change(old_state, runtime.state.value)
+            runtime.last_error = str(Exception)
             return HealthStatus.UNHEALTHY
-        if health is HealthStatus.HEALTHY and runtime.state is InstanceState.RECONNECTING:
-            runtime.state = InstanceState.ACTIVE
-        elif health is not HealthStatus.HEALTHY:
+        
+        if health is HealthStatus.HEALTHY:
+            if runtime.state in (InstanceState.RECONNECTING, InstanceState.DEGRADED):
+                runtime.state = InstanceState.ACTIVE
+                runtime.last_error = None
+        elif health is HealthStatus.UNKNOWN:
+            if runtime.state is InstanceState.ACTIVE:
+                runtime.state = InstanceState.DEGRADED
+        else:
             runtime.state = InstanceState.DEGRADED
+        
         runtime.updated_at = datetime.now(UTC)
         runtime._notify_state_change(old_state, runtime.state.value)
         return health
@@ -139,9 +152,31 @@ class InstanceManager:
     async def ensure_started(self, instance_id: str) -> None:
         runtime = self.instances[instance_id]
         if runtime.state is not InstanceState.ACTIVE:
-            await self.setup(instance_id)
+            await self._attempt_recovery(instance_id)
         if runtime.state is InstanceState.ACTIVE:
             await runtime.channel.start()
+
+    async def _attempt_recovery(self, instance_id: str) -> None:
+        runtime = self.instances[instance_id]
+        old_state = runtime.state.value
+        try:
+            result = await runtime.channel.setup()
+            if result.status is SetupStatus.READY:
+                runtime.state = InstanceState.ACTIVE
+                runtime.last_error = None
+            elif result.status is SetupStatus.NEEDS_INTERACTION:
+                runtime.state = InstanceState.SETUP_REQUIRED
+                runtime.last_error = result.message
+            else:
+                runtime.state = InstanceState.DEGRADED
+                runtime.last_error = result.message
+            runtime.updated_at = datetime.now(UTC)
+            runtime._notify_state_change(old_state, runtime.state.value)
+        except Exception as exc:
+            runtime.state = InstanceState.RECONNECTING
+            runtime.last_error = str(exc)
+            runtime.updated_at = datetime.now(UTC)
+            runtime._notify_state_change(old_state, runtime.state.value)
 
     async def stop(self, instance_id: str) -> None:
         runtime = self.instances[instance_id]

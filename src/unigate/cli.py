@@ -144,6 +144,43 @@ async def _process_command(command: dict[str, Any]) -> dict[str, Any]:
         except Exception as e:
             return {"error": str(e)}
 
+    if cmd == "instances_health":
+        instance_ids = args.get("instance_ids", [])
+        force = args.get("force", False)
+        
+        all_instances = _daemon_exchange.instances
+        if instance_ids:
+            check_instances = {k: v for k, v in all_instances.items() if k in instance_ids}
+        else:
+            check_instances = all_instances
+        
+        results = {}
+        for iid, runtime in check_instances.items():
+            channel = runtime.channel if hasattr(runtime, "channel") else runtime
+            if hasattr(channel, "health_check"):
+                try:
+                    result = await channel.health_check()
+                    results[iid] = {
+                        "status": result.status.value if hasattr(result, "status") else str(result),
+                        "message": result.message if hasattr(result, "message") else None,
+                        "last_check": result.last_check.isoformat() if hasattr(result, "last_check") and result.last_check else None,
+                        "details": result.details if hasattr(result, "details") else {},
+                    }
+                except Exception as e:
+                    results[iid] = {
+                        "status": "error",
+                        "message": str(e),
+                        "details": {},
+                    }
+            else:
+                results[iid] = {
+                    "status": "unknown",
+                    "message": "No health_check method available",
+                    "details": {},
+                }
+        
+        return {"ok": True, "instances": results}
+
     if cmd == "reload":
         config_path = args.get("config_path", "unigate.yaml")
         try:
@@ -682,6 +719,22 @@ Examples:
         description="Disable an instance (stops processing)",
     )
     inst_disable.add_argument("instance_id", help="Instance name to disable")
+    
+    inst_health = inst_sub.add_parser(
+        "health",
+        help="Check instance health status",
+        description="Check if instances are healthy and can send/receive messages",
+    )
+    inst_health.add_argument(
+        "instance_id",
+        nargs="*",
+        help="Instance name(s) to check (checks all if omitted)",
+    )
+    inst_health.add_argument(
+        "--force", "-f",
+        action="store_true",
+        help="Force fresh health check instead of using cached result",
+    )
     
     # Inbox command
     inbox_parser = sub.add_parser(
@@ -1326,6 +1379,26 @@ instances:
                 })
                 if response.get("ok"):
                     print(f"Disabled: {args.instance_id}")
+                else:
+                    print(f"Error: {response.get('error', 'unknown')}", file=sys.stderr)
+                    return 1
+            elif args.subcommand == "health":
+                instance_ids = args.instance_id if args.instance_id else []
+                response = send_daemon_command({
+                    "command": "instances_health",
+                    "args": {"instance_ids": instance_ids, "force": args.force},
+                })
+                if response.get("ok"):
+                    instances = response.get("instances", {})
+                    print(f"{'INSTANCE':<20} {'STATUS':<12} {'MESSAGE':<40}")
+                    print("-" * 75)
+                    for iid, info in instances.items():
+                        status = info.get("status", "unknown")
+                        msg = info.get("message", "")[:38]
+                        print(f"{iid:<20} {status:<12} {msg:<40}")
+                    if instances:
+                        healthy = sum(1 for i in instances.values() if i.get("status") == "healthy")
+                        print(f"\n{healthy}/{len(instances)} instances healthy")
                 else:
                     print(f"Error: {response.get('error', 'unknown')}", file=sys.stderr)
                     return 1
