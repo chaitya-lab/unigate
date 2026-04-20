@@ -113,7 +113,7 @@ unconfigured → setup_required → setting_up → active → degraded → recon
 
 ## Storage Model
 
-Five stores with different backends:
+**Message Stores** (4 stores with swappable backends):
 
 | Store | Purpose | Backend Options |
 |-------|---------|-----------------|
@@ -121,13 +121,21 @@ Five stores with different backends:
 | Outbox | Pending outbound | Memory, SQLite, File |
 | Sessions | Conversation state | Memory, SQLite, File |
 | Dedup | Idempotency | Memory, SQLite |
-| SecureStore | Credentials | Encrypted SQLite |
+
+**Secure Store** (separate, for credentials/tokens):
+
+| Store | Purpose | Backend Options |
+|-------|---------|-----------------|
+| SecureStore | API tokens, credentials | Memory, Encrypted SQLite |
+
+Note: SecureStore is separate because it handles encrypted data (API keys, bot tokens) requiring different backend semantics.
 
 ### Backends
 
 **Memory** - Fast, no persistence (dev/test)
 **SQLite** - Single file, ACID transactions (production)
 **File** - JSON files per message (debugging)
+**Encrypted SQLite** - SQLite with encryption for secrets
 
 ## Resilience
 

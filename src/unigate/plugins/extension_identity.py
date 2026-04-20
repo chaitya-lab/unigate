@@ -72,6 +72,13 @@ class IdentityExtension:
     
     name: ClassVar[str] = "identity"
     priority: ClassVar[int] = 5
+    type: ClassVar[str] = "extension"
+    parameters = {
+        "names": {"type": "dict", "description": "ID → display name mapping"},
+        "links": {"type": "dict", "description": "canonical_id → list of platform IDs"},
+        "auto_detect": {"type": "bool", "description": "Auto-detect identifier types", "default": True},
+        "auto_patterns": {"type": "list", "description": "Patterns for auto-detection"},
+    }
     
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         self._config = config or {}

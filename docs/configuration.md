@@ -460,7 +460,17 @@ What to do with messages that don't match any rule.
 |-------|-------------|
 | `keep` | Store in unprocessed (default) |
 | `discard` | Drop the message |
-| `forward` | Forward to `default_instance` |
+| `forward` | Forward to `default_forward_to` |
+
+### `default_forward_to`
+
+When `default_action: forward`, specify destination instances:
+
+```yaml
+routing:
+  default_action: forward
+  default_forward_to: [archive_channel]
+```
 
 ### Routing Rules
 

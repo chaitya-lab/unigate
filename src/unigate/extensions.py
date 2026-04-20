@@ -71,6 +71,8 @@ _EXTENSION_REGISTRY: dict[str, type] = {
 
 def create_extension(config: dict[str, Any]) -> InboundExtension | OutboundExtension | EventExtension | None:
     """Create an extension instance from configuration."""
+    from .plugins.extension_identity import IdentityExtension
+    
     name = config.get("name")
     if name == "log":
         priority = config.get("priority", 100)
@@ -81,4 +83,7 @@ def create_extension(config: dict[str, Any]) -> InboundExtension | OutboundExten
     if name == "log_event":
         priority = config.get("priority", 100)
         return LoggingEventExtension(priority=priority)
+    if name == "identity":
+        ext_config = config.get("config", {})
+        return IdentityExtension(ext_config)
     return None

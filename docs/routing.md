@@ -137,6 +137,8 @@ match:
 - `msg` - Full Message object
 - `config` - Rule config dict
 
+> **Security Note:** Code matches use Python `eval()`. Only use with **trusted configs** (your own YAML files). If accepting configs from untrusted sources (multi-tenant, web UI), disable code matches or run in sandboxed mode.
+
 ---
 
 ## Actions
@@ -145,14 +147,20 @@ match:
 actions:
   forward_to: [instance1, instance2]   # Send to destination(s)
   keep_in_default: true                  # Also keep in source (optional)
-  extensions: [ext1, ext2]              # Transforms to apply
+  transforms: [uppercase, truncate]     # Transforms to apply (alias: extensions)
   add_tags: [tag1, tag2]                # Tags for tracking
 ```
 
 - `forward_to`: One or more instances (fan-out = multiple destinations)
 - `keep_in_default`: Keep message in original instance too
-- `extensions`: Transform names to apply
+- `transforms`: Transform plugins to apply (alias: `extensions`)
 - `add_tags`: Tags added to message metadata
+
+> **Note: Transforms vs Extensions**
+> - `transforms` (or `extensions`): Per-rule message modifications (uppercase, truncate, add_metadata)
+> - Pipeline extensions: Global hooks in `extensions:` config section (identity, logging)
+> 
+> These are two separate systems. Transforms apply to matched messages per rule. Pipeline extensions run on all messages.
 
 ---
 
