@@ -324,9 +324,42 @@ instances:
 instances:
   web:
     type: webui
+    config:
+      title: "My Chat"     # Custom title for the UI
+      theme: dark         # light or dark theme
 ```
 
-No additional config needed.
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `title` | string | No | Custom title for the web UI |
+| `theme` | string | No | `light` or `dark` (default: `dark`) |
+| `token` | string | No | Single API token for authentication |
+| `tokens` | list | No | Multiple tokens: `["user1:token1", "user2:token2"]` |
+
+**With authentication:**
+
+```yaml
+instances:
+  web:
+    type: webui
+    config:
+      title: "My Chat"
+      theme: dark
+      # Single token (simple auth)
+      token: "my-secret-token"
+      
+      # OR multiple tokens with usernames
+      tokens:
+        - "admin:admin-token"
+        - "user1:user1-token"
+        - "user2:user2-token"
+```
+
+Token format for requests:
+- Header: `Authorization: Bearer <token>`
+- Or query param: `?token=<token>`
+
+The tokens are checked against the configured `token` or the token part after `:` in `tokens` list.
 
 #### web - Generic Webhook
 
