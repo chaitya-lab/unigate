@@ -319,36 +319,74 @@ class RuleMatcher:
           - type: sender_id      # field name
             op: eq           # operation: eq, ne, contains, startswith, endswith, in, gt, lt, regex
             value: "123"     # value to match
+          
+          # Optional: combine with OR instead of AND
+          - type: sender_id
+            op: startswith
+            value: "vip_"
+            logic: or        # makes this OR with previous
         
-        Example:
+        Example (AND - default):
           - type: sender_id
             op: in
             value: ["123", "456"]
           - type: text
             op: contains
-            value: "urgent"
+            value: "urgent"   # both must match
+        
+        Example (OR):
+          - type: sender_id
+            op: in
+            value: ["123", "456"]
+          - type: sender_id
+            op: startswith  
+            value: "vip_"
+            logic: or        # either must match
         """
         if not conditions:
             return True
         
-        for cond in conditions:
-            if not isinstance(cond, dict):
-                continue
-            
-            field = cond.get("type")
-            op = cond.get("op", "eq")
-            value = cond.get("value")
-            
-            if not field:
-                continue
-            
-            # Get field value from message
-            field_value = cls._get_field_value(message, field)
-            
-            if not cls._match_value(field_value, op, value):
-                return False
+        # Check if any condition has logic: or
+        has_or = any(cond.get("logic", "").lower() == "or" for cond in conditions if isinstance(cond, dict))
         
-        return True
+        if has_or:
+            # OR logic: return True if ANY matches
+            for cond in conditions:
+                if not isinstance(cond, dict):
+                    continue
+                
+                field = cond.get("type")
+                op = cond.get("op", "eq")
+                value = cond.get("value")
+                
+                if not field:
+                    continue
+                
+                field_value = cls._get_field_value(message, field)
+                
+                if cls._match_value(field_value, op, value):
+                    return True
+            
+            return False
+        else:
+            # AND logic: return False if ANY doesn't match
+            for cond in conditions:
+                if not isinstance(cond, dict):
+                    continue
+                
+                field = cond.get("type")
+                op = cond.get("op", "eq")
+                value = cond.get("value")
+                
+                if not field:
+                    continue
+                
+                field_value = cls._get_field_value(message, field)
+                
+                if not cls._match_value(field_value, op, value):
+                    return False
+            
+            return True
     
     @staticmethod
     def _get_field_value(message: Message, field: str) -> Any:

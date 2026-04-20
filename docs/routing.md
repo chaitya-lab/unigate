@@ -59,21 +59,38 @@ All conditions must match (AND logic).
 
 ### 2. Type-Based Match (Operations)
 
-Best for: Complex conditions, multiple operations on same field
+Best for: Complex conditions on message fields
 
 ```yaml
 match:
   - type: sender_id
     op: in
-    value: ["123", "456", "789"]     # Multiple values (OR)
-  
+    value: ["123", "456", "789"]     # Multiple values (OR within单一field)
+```
+
+**All conditions in list use AND logic by default**
+
+```yaml
+match:
+  - type: sender_id
+    op: eq
+    value: "123"                  # AND
   - type: text
     op: contains
-    value: "urgent"                 # Contains substring
-  
-  - type: group_id
+    value: "urgent"               # both must match
+```
+
+**Use `logic: or` for OR within multiple conditions:**
+
+```yaml
+match:
+  - type: sender_id
+    op: eq
+    value: "123"
+  - type: sender_id
     op: startswith
-    value: "support-"              # Starts with
+    value: "vip_"
+    logic: or          # Either sender_id == "123" OR starts with "vip_"
 ```
 
 **Operators:**
