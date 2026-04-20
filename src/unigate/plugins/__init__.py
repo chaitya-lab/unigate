@@ -22,6 +22,7 @@ from .base import (
 from .channel_web import WebChannelPlugin, WebChannel, APIKeyWebChannel, BearerTokenWebChannel
 from .channel_telegram import TelegramChannelPlugin, TelegramChannel
 from .channel_webui import WebUIChannel
+from .channel_fake_sms import FakeSMSChannel
 from .match_from import FromMatcher, FromPatternMatcher
 from .match_text import TextContainsMatcher, TextPatternMatcher, TextStartsWithMatcher, IsCommandMatcher, SubjectContainsMatcher
 from .match_sender import SenderMatcher, SenderPatternMatcher, SenderNameMatcher, SenderDomainMatcher

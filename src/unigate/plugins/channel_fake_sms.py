@@ -1,4 +1,4 @@
-"""SMS channel adapter - demonstrates capability degradation."""
+"""Fake SMS channel for testing - demonstrates capability degradation."""
 
 from __future__ import annotations
 
@@ -17,17 +17,18 @@ from ..stores import SecureStore
 SMS_MAX_LENGTH = 160
 
 
-class SMSChannel(BaseChannel):
-    """SMS channel with text-only support.
+class FakeSMSChannel(BaseChannel):
+    """Fake SMS channel for testing.
     
-    Demonstrates degrading rich interactions to plain text.
-    This channel doesn't support any interactive - converts to text.
+    Does NOT connect to any real SMS provider.
+    Use for testing routing, degradation, and message flow.
+    Demonstrates how a text-only channel degrades rich interactions.
     """
     
-    name: ClassVar[str] = "sms"
+    name: ClassVar[str] = "fake_sms"
     type: ClassVar[str] = "channel"
-    transport: ClassVar[str] = "http"
-    auth_method: ClassVar[str] = "credentials"
+    transport: ClassVar[str] = "none"
+    auth_method: ClassVar[str] = "none"
     parameters = {
         "from_number": {"type": "str", "description": "Sender phone number"},
         "provider": {"type": "str", "description": "SMS provider: twilio|awssns", "default": "twilio"},
@@ -231,4 +232,4 @@ class SMSChannel(BaseChannel):
         return []
 
 
-__all__ = ["SMSChannel"]
+__all__ = ["FakeSMSChannel"]
